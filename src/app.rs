@@ -467,8 +467,16 @@ fn StatusBar() -> impl IntoView {
                 let server = server.clone();
                 async move {
                     log!("Fetching models from {} at {}", server.provider, server.url);
-                    let endpoint = if server.provider == "LM Studio" { "/models" } else { "/api/tags" };
-                    let full_url = server.url.clone() + endpoint;
+                    let base_url = server.url.trim_end_matches('/');
+                    let full_url = if server.provider == "LM Studio" {
+                        if base_url.ends_with("/v1") {
+                            format!("{}/models", base_url)
+                        } else {
+                            format!("{}/v1/models", base_url)
+                        }
+                    } else {
+                        format!("{}/api/tags", base_url)
+                    };
                     
                     let args = serde_wasm_bindgen::to_value(&json!({
                         "url": full_url,
@@ -541,8 +549,16 @@ fn StatusBar() -> impl IntoView {
             log!("Starting connection check for {} at {}", server.provider, server.url);
             set_server_statuses.update(|s| { s.insert(id.clone(), ConnectionStatus::Checking); });
             
-            let endpoint = if server.provider == "LM Studio" { "/models" } else { "/api/tags" };
-            let full_url = server.url.clone() + endpoint;
+            let base_url = server.url.trim_end_matches('/');
+            let full_url = if server.provider == "LM Studio" {
+                if base_url.ends_with("/v1") {
+                    format!("{}/models", base_url)
+                } else {
+                    format!("{}/v1/models", base_url)
+                }
+            } else {
+                format!("{}/api/tags", base_url)
+            };
             
             let args = match serde_wasm_bindgen::to_value(&json!({
                 "url": full_url,
@@ -589,6 +605,11 @@ fn StatusBar() -> impl IntoView {
         if show_settings.get() {
             fetch_models();
         }
+    });
+
+    // Initial model fetch when component is mounted
+    let _ = Effect::new(move |_| {
+        fetch_models();
     });
 
     // Update status every second

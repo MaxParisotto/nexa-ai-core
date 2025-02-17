@@ -161,7 +161,7 @@ async fn fetch_models_lmstudio(url: String, timeout: u64, log_state: State<'_, M
 #[tauri::command]
 async fn fetch_models_ollama(url: String, timeout: u64, log_state: State<'_, Mutex<LogState>>) -> Result<Result<Vec<String>, String>, String> {
     // Ensure we have the correct tags endpoint
-    let base_url = url.trim_end_matches('/');
+    let base_url = url.trim_end_matches('/').trim_end_matches("/api/tags");
     let tags_url = format!("{}/api/tags", base_url);
     
     add_log_entry(&log_state, "info", &format!("Checking Ollama server at {}", tags_url), "server_check")?;
