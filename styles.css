@@ -135,6 +135,51 @@ button {
     gap: 5px;
 }
 
+.model-select-container {
+    position: relative;
+    min-width: 200px;
+}
+
+.status-select {
+    background: transparent;
+    border: 1px solid #3f3f3f;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    width: 100%;
+    cursor: pointer;
+}
+
+.status-select:hover {
+    border-color: #646cff;
+}
+
+.status-select:focus {
+    outline: none;
+    border-color: #646cff;
+}
+
+.status-select option,
+.status-select optgroup {
+    background: #2f2f2f;
+    color: #ffffff;
+}
+
+@media (prefers-color-scheme: light) {
+    .status-select {
+        background: transparent;
+        border-color: #ddd;
+        color: #2f2f2f;
+    }
+
+    .status-select option,
+    .status-select optgroup {
+        background: #ffffff;
+        color: #2f2f2f;
+    }
+}
+
 .settings-btn {
     background: none;
     border: none;
@@ -825,5 +870,190 @@ optgroup {
 
     .log-warn {
         background: #2d261f;
+    }
+}
+
+.status-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chat-btn {
+    background: none;
+    border: none;
+    color: #ffffff;
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    transition: background-color 0.2s;
+}
+
+.chat-btn:hover,
+.chat-btn.active {
+    background: #3f3f3f;
+}
+
+.chat-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.chat-modal .modal-content {
+    max-width: 90%;
+    width: 800px;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    height: 80vh;
+}
+
+.chat-header {
+    padding: 16px;
+    border-bottom: 1px solid #eee;
+    background: #f8f8f8;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chat-header h2 {
+    margin: 0;
+    color: #2f2f2f;
+    font-size: 1.4em;
+}
+
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #ffffff;
+    border-radius: 0 0 12px 12px;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chat-message {
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 80%;
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+.chat-message:nth-child(odd) {
+    background: #f0f0f0;
+    align-self: flex-start;
+}
+
+.chat-message:nth-child(even) {
+    background: #e3e8ff;
+    align-self: flex-end;
+}
+
+.chat-input-form {
+    display: flex;
+    gap: 8px;
+    padding: 16px;
+    border-top: 1px solid #eee;
+    background: #ffffff;
+    border-radius: 0 0 12px 12px;
+}
+
+.chat-input-form input {
+    flex: 1;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.chat-input-form input:focus {
+    border-color: #646cff;
+    outline: none;
+}
+
+.chat-input-form button {
+    background: #646cff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    padding: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.chat-input-form button:hover {
+    background: #535bf2;
+}
+
+.chat-input-form button svg {
+    width: 20px;
+    height: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .chat-btn {
+        color: #ffffff;
+    }
+
+    .chat-btn:hover,
+    .chat-btn.active {
+        background: #4f4f4f;
+    }
+
+    .chat-header {
+        background: #1f1f1f;
+        border-bottom-color: #3f3f3f;
+    }
+
+    .chat-header h2 {
+        color: #ffffff;
+    }
+
+    .chat-container {
+        background: #1f1f1f;
+    }
+
+    .chat-message:nth-child(odd) {
+        background: #2f2f2f;
+    }
+
+    .chat-message:nth-child(even) {
+        background: #2a2a3f;
+    }
+
+    .chat-input-form {
+        background: #1f1f1f;
+        border-top-color: #3f3f3f;
+    }
+
+    .chat-input-form input {
+        background: #2f2f2f;
+        border-color: #3f3f3f;
+        color: #ffffff;
+    }
+
+    .chat-input-form input:focus {
+        border-color: #646cff;
     }
 }
