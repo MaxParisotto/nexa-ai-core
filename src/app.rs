@@ -229,7 +229,7 @@ fn LogViewer() -> impl IntoView {
     let copy_logs = move |_| {
         let logs_text = filtered_logs()
             .into_iter()
-            .map(|log| format!("[{}] [{}] {} - {}", log.timestamp, log.level, log.target, log.message))
+            .map(|log| format!("{} [{}] [{}] {}", log.timestamp, log.level, log.target, log.message))
             .collect::<Vec<_>>()
             .join("\n");
         
@@ -333,7 +333,7 @@ fn LogViewer() -> impl IntoView {
                                 let level_lower = level.to_lowercase();
                                 view! {
                                     <div class=format!("log-entry log-{}", level_lower)>
-                                        <span class="log-timestamp">{timestamp}</span>
+                                        <span class="log-timestamp">{format!("{}", timestamp)}</span>
                                         <span class=format!("log-level level-{}", level_lower)>
                                             {level}
                                         </span>
@@ -364,7 +364,7 @@ fn StatusBar() -> impl IntoView {
             ServerConfig {
                 id: "lmstudio-1".to_string(),
                 name: "LM Studio".to_string(),
-                url: "http://localhost:1234".to_string(),
+                url: "http://localhost:1234/v1".to_string(),
                 provider: "LM Studio".to_string(),
                 selected_model: String::new(),
             },
@@ -391,7 +391,7 @@ fn StatusBar() -> impl IntoView {
                 id,
                 name: provider.to_string(),
                 url: match provider {
-                    "LM Studio" => "http://localhost:1234".to_string(),
+                    "LM Studio" => "http://localhost:1234/v1".to_string(),
                     "Ollama" => "http://localhost:11434".to_string(),
                     _ => "http://localhost:8000".to_string(),
                 },

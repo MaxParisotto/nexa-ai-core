@@ -71,9 +71,49 @@ fn add_log_entry(log_state: &State<'_, Mutex<LogState>>, level: &str, message: &
     state.add_entry(level, message, target)
 }
 
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct OpenAIModel {
+    id: String,
+    object: String,
+    owned_by: String,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct OpenAIModelList {
+    data: Vec<OpenAIModel>,
+    object: String,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct OllamaModel {
+    name: String,
+    model: String,
+    modified_at: String,
+    size: u64,
+    digest: String,
+}
+
+#[derive(Deserialize)]
+struct OllamaResponse {
+    models: Vec<OllamaModel>,
+}
+
 #[tauri::command]
 async fn fetch_models_lmstudio(url: String, timeout: u64, log_state: State<'_, Mutex<LogState>>) -> Result<Result<Vec<String>, String>, String> {
-    add_log_entry(&log_state, "info", &format!("Checking LM Studio server at {}", url), "server_check")?;
+    // Ensure we have the correct models endpoint
+    let base_url = url.trim_end_matches('/');
+    let models_url = if base_url.ends_with("/v1") {
+        format!("{}/models", base_url)
+    } else if !base_url.contains("/v1/") {
+        format!("{}/v1/models", base_url)
+    } else {
+        base_url.to_string()
+    };
+    
+    add_log_entry(&log_state, "info", &format!("Checking LM Studio server at {}", models_url), "server_check")?;
 
     let client = Client::builder()
         .timeout(Duration::from_millis(timeout))
@@ -84,11 +124,12 @@ async fn fetch_models_lmstudio(url: String, timeout: u64, log_state: State<'_, M
             err
         })?;
 
-    match client.get(&url).send().await {
+    match client.get(&models_url).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.json::<Vec<String>>().await {
-                    Ok(models) => {
+                match response.json::<OpenAIModelList>().await {
+                    Ok(model_list) => {
+                        let models: Vec<String> = model_list.data.into_iter().map(|m| m.id).collect();
                         let _ = add_log_entry(
                             &log_state,
                             "info",
@@ -119,7 +160,11 @@ async fn fetch_models_lmstudio(url: String, timeout: u64, log_state: State<'_, M
 
 #[tauri::command]
 async fn fetch_models_ollama(url: String, timeout: u64, log_state: State<'_, Mutex<LogState>>) -> Result<Result<Vec<String>, String>, String> {
-    add_log_entry(&log_state, "info", &format!("Checking Ollama server at {}", url), "server_check")?;
+    // Ensure we have the correct tags endpoint
+    let base_url = url.trim_end_matches('/');
+    let tags_url = format!("{}/api/tags", base_url);
+    
+    add_log_entry(&log_state, "info", &format!("Checking Ollama server at {}", tags_url), "server_check")?;
 
     let client = Client::builder()
         .timeout(Duration::from_millis(timeout))
@@ -130,17 +175,14 @@ async fn fetch_models_ollama(url: String, timeout: u64, log_state: State<'_, Mut
             err
         })?;
 
-    #[derive(Deserialize)]
-    struct OllamaModel {
-        name: String,
-    }
-
-    match client.get(&url).send().await {
+    match client.get(&tags_url).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.json::<Vec<OllamaModel>>().await {
-                    Ok(models) => {
-                        let models: Vec<String> = models.into_iter().map(|m| m.name).collect();
+                match response.json::<OllamaResponse>().await {
+                    Ok(model_list) => {
+                        let models: Vec<String> = model_list.models.into_iter()
+                            .map(|m| m.name)
+                            .collect();
                         let _ = add_log_entry(
                             &log_state,
                             "info",
@@ -194,6 +236,15 @@ pub fn run() {
                 Target::new(tauri_plugin_log::TargetKind::Webview),
                 Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None })
             ])
+            .format(|out, message, record| {
+                out.finish(format_args!(
+                    "{} [{}] [{}] {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    record.level(),
+                    record.target(),
+                    message
+                ))
+            })
             .level(log::LevelFilter::Debug)
             .build())
         .plugin(tauri_plugin_http::init())
