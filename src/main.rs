@@ -1,7 +1,7 @@
+use leptos::prelude::*;
 mod app;
 
-use app::*;
-use leptos::prelude::*;
+pub use app::*;
 
 fn main() {
     console_error_panic_hook::set_once();

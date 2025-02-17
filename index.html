@@ -6,6 +6,52 @@
     <link data-trunk rel="css" href="styles.css" />
     <link data-trunk rel="copy-dir" href="public" />
     <link data-trunk rel="rust" data-wasm-opt="z" />
+    <style>
+        #status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #f0f0f0;
+            border-top: 1px solid #ccc;
+            padding: 5px 10px;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .status-item {
+            margin: 0 10px;
+        }
+        body {
+            margin-bottom: 30px; /* Make room for status bar */
+        }
+    </style>
   </head>
-  <body></body>
+  <body>
+    <div id="status-bar">
+        <span class="status-item" id="connections">Connections: 0</span>
+        <span class="status-item" id="uptime">Uptime: 0s</span>
+        <span class="status-item" id="memory">Memory: 0%</span>
+    </div>
+
+    <script>
+        const { invoke } = window.__TAURI__.tauri;
+
+        async function updateStatus() {
+            try {
+                const status = await invoke('get_system_status');
+                document.getElementById('connections').textContent = `Connections: ${status.active_connections}`;
+                document.getElementById('uptime').textContent = `Uptime: ${Math.floor(status.uptime)}s`;
+                document.getElementById('memory').textContent = `Memory: ${status.memory_usage.toFixed(1)}%`;
+            } catch (e) {
+                console.error('Failed to update status:', e);
+            }
+        }
+
+        // Update status every second
+        setInterval(updateStatus, 1000);
+        // Initial update
+        updateStatus();
+    </script>
+  </body>
 </html>
