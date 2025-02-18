@@ -19,150 +19,228 @@ class ReteEditor {
         const content = document.createElement('div');
         content.className = 'node-content';
 
-        switch (type) {
-            case 'llm':
-                // Server selection
-                const serverSelect = document.createElement('select');
-                serverSelect.className = 'node-select server-select';
-                serverSelect.innerHTML = `
-                    <option value="">Select Server</option>
-                    <option value="http://localhost:1234/v1">LM Studio</option>
-                    <option value="http://localhost:11434">Ollama</option>
-                `;
+        // Create a single container for all inputs
+        const container = document.createElement('div');
+        container.className = 'node-inputs-container';
 
-                // Model selection container
-                const modelSelectContainer = document.createElement('div');
-                modelSelectContainer.className = 'node-select-container';
+        // Server selection
+        const serverSelect = document.createElement('select');
+        serverSelect.className = 'node-select';
+        serverSelect.innerHTML = `
+            <option value="">Select Server</option>
+            <option value="http://localhost:1234/v1">LM Studio</option>
+            <option value="http://localhost:11434">Ollama</option>
+        `;
 
-                // Model selection
-                const modelSelect = document.createElement('select');
-                modelSelect.className = 'node-select model-select';
+        // Model selection
+        const modelSelectContainer = document.createElement('div');
+        modelSelectContainer.className = 'select-wrapper';
+        const modelSelect = document.createElement('select');
+        modelSelect.className = 'node-select';
+        modelSelect.innerHTML = '<option value="">Select Model</option>';
+        modelSelect.disabled = true;
+
+        // Loading indicator
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.className = 'loading-indicator';
+        loadingIndicator.style.display = 'none';
+        loadingIndicator.textContent = 'Loading models...';
+
+        modelSelectContainer.appendChild(modelSelect);
+        modelSelectContainer.appendChild(loadingIndicator);
+
+        // Task input
+        const taskInput = document.createElement('textarea');
+        taskInput.className = 'node-input';
+        taskInput.placeholder = 'Enter task description...';
+
+        // Temperature control
+        const tempContainer = document.createElement('div');
+        tempContainer.className = 'param-row';
+        const tempLabel = document.createElement('label');
+        tempLabel.textContent = 'Temperature:';
+        const tempSlider = document.createElement('input');
+        tempSlider.type = 'range';
+        tempSlider.className = 'param-slider';
+        tempSlider.min = '0';
+        tempSlider.max = '100';
+        tempSlider.value = '70';
+        const tempValue = document.createElement('span');
+        tempValue.className = 'param-value';
+        tempValue.textContent = '0.7';
+        tempContainer.appendChild(tempLabel);
+        tempContainer.appendChild(tempSlider);
+        tempContainer.appendChild(tempValue);
+
+        // Add elements to container
+        container.appendChild(serverSelect);
+        container.appendChild(modelSelectContainer);
+        container.appendChild(taskInput);
+        container.appendChild(tempContainer);
+
+        // Add container to content
+        content.appendChild(container);
+
+        // Update models when server changes
+        serverSelect.addEventListener('change', async (e) => {
+            const serverUrl = e.target.value;
+            if (!serverUrl) {
                 modelSelect.innerHTML = '<option value="">Select Model</option>';
                 modelSelect.disabled = true;
+                return;
+            }
 
-                modelSelectContainer.appendChild(modelSelect);
+            // If we have cached models, use them
+            if (this.modelCache.has(serverUrl)) {
+                const cachedModels = this.modelCache.get(serverUrl);
+                this.updateModelSelect(modelSelect, cachedModels);
+                return;
+            }
 
-                // Loading indicator
-                const loadingIndicator = document.createElement('div');
-                loadingIndicator.className = 'loading-indicator';
-                loadingIndicator.style.display = 'none';
-                loadingIndicator.innerHTML = 'Loading models...';
+            try {
+                modelSelect.disabled = true;
+                loadingIndicator.style.display = 'block';
+                modelSelect.innerHTML = '<option value="">Loading models...</option>';
 
-                // Update models when server changes
-                serverSelect.addEventListener('change', async (e) => {
-                    const serverUrl = e.target.value;
-                    if (!serverUrl) {
-                        modelSelect.innerHTML = '<option value="">Select Model</option>';
-                        modelSelect.disabled = true;
-                        return;
-                    }
-
-                    // If we have cached models, use them
-                    if (this.modelCache.has(serverUrl)) {
-                        console.log('Using cached models for', serverUrl);
-                        const cachedModels = this.modelCache.get(serverUrl);
-                        modelSelect.innerHTML = '<option value="">Select Model</option>' +
-                            cachedModels.map(model => `<option value="${model}">${model}</option>`).join('');
-                        modelSelect.disabled = false;
-                        return;
-                    }
-
-                    try {
-                        modelSelect.disabled = true;
-                        loadingIndicator.style.display = 'block';
-                        modelSelect.innerHTML = '<option value="">Loading models...</option>';
-
-                        const { invoke } = window.__TAURI__.tauri;
-                        const command = serverUrl.includes('11434') ? 'fetch_models_ollama' : 'fetch_models_lmstudio';
-                        
-                        const result = await invoke(command, {
-                            url: serverUrl,
-                            timeout: 5000
-                        });
-
-                        console.log('Server response:', result);
-
-                        let models = [];
-                        if (result && Array.isArray(result)) {
-                            models = result;
-                        } else if (result && typeof result === 'object') {
-                            if (result.Ok) {
-                                const innerResult = result.Ok;
-                                if (Array.isArray(innerResult)) {
-                                    models = innerResult;
-                                } else if (innerResult && innerResult.Ok && Array.isArray(innerResult.Ok)) {
-                                    models = innerResult.Ok;
-                                }
-                            }
-                        }
-
-                        if (models.length > 0) {
-                            // Cache the models
-                            this.modelCache.set(serverUrl, models);
-                            
-                            // Update the select
-                            modelSelect.innerHTML = '<option value="">Select Model</option>' +
-                                models.map(model => `<option value="${model}">${model}</option>`).join('');
-                            modelSelect.disabled = false;
-                        } else {
-                            throw new Error('No models found');
-                        }
-                    } catch (error) {
-                        console.error('Error fetching models:', error);
-                        modelSelect.innerHTML = `<option value="">Error: ${error.message || 'Failed to load models'}</option>`;
-                        modelSelect.disabled = true;
-                    } finally {
-                        loadingIndicator.style.display = 'none';
-                    }
+                const { invoke } = window.__TAURI__.tauri;
+                const command = serverUrl.includes('11434') ? 'fetch_models_ollama' : 'fetch_models_lmstudio';
+                
+                const result = await invoke(command, {
+                    url: serverUrl,
+                    timeout: 5000
                 });
 
-                // Task input
-                const taskInput = document.createElement('textarea');
-                taskInput.className = 'node-input task-input';
-                taskInput.placeholder = 'Enter task description...';
+                // Log the raw response for debugging
+                console.log('Raw server response:', result);
 
-                // Tools section
-                const toolsContainer = document.createElement('div');
-                toolsContainer.className = 'tools-container';
-                toolsContainer.innerHTML = `
-                    <div class="tools-header">Available Tools</div>
-                    <div class="tools-list">
-                        <label><input type="checkbox" value="web_search"> Web Search</label>
-                        <label><input type="checkbox" value="code_analysis"> Code Analysis</label>
-                        <label><input type="checkbox" value="file_operations"> File Operations</label>
-                        <label><input type="checkbox" value="data_processing"> Data Processing</label>
-                    </div>
-                `;
+                // Handle the nested Result structure from Rust
+                if (result && result.Ok) {
+                    const models = Array.isArray(result.Ok) ? result.Ok : 
+                                 (result.Ok.Ok && Array.isArray(result.Ok.Ok)) ? result.Ok.Ok : [];
+                    
+                    if (models.length > 0) {
+                        this.modelCache.set(serverUrl, models);
+                        this.updateModelSelect(modelSelect, models);
+                    } else {
+                        throw new Error('No models found');
+                    }
+                } else {
+                    // If result.Err exists, use that error message
+                    const errorMessage = result && result.Err ? result.Err : 'Failed to load models';
+                    throw new Error(errorMessage);
+                }
+            } catch (error) {
+                console.error('Error fetching models:', error);
+                modelSelect.innerHTML = `<option value="">Error: ${error.message || 'Failed to load models'}</option>`;
+                modelSelect.disabled = true;
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        });
 
-                // Parameters section
-                const paramsContainer = document.createElement('div');
-                paramsContainer.className = 'params-container';
-                paramsContainer.innerHTML = `
-                    <div class="params-header">Parameters</div>
-                    <div class="param-item">
-                        <label>Temperature:</label>
-                        <input type="range" min="0" max="100" value="70" class="param-slider">
-                        <span class="param-value">0.7</span>
-                    </div>
-                    <div class="param-item">
-                        <label>Max Tokens:</label>
-                        <input type="number" value="2048" min="1" max="8192" class="param-input">
-                    </div>
-                `;
-
-                // Add all elements to content
-                content.appendChild(serverSelect);
-                content.appendChild(modelSelectContainer);
-                content.appendChild(loadingIndicator);
-                content.appendChild(taskInput);
-                content.appendChild(toolsContainer);
-                content.appendChild(paramsContainer);
-                break;
-
-            // Add more node types here if needed
-        }
+        // Add temperature slider event listener
+        tempSlider.addEventListener('input', (e) => {
+            tempValue.textContent = (e.target.value / 100).toFixed(2);
+        });
 
         return content;
+    }
+
+    parseModelsResponse(result) {
+        // Log the raw response for debugging
+        console.log('Parsing models response:', result);
+
+        // Handle null or undefined result
+        if (!result) return [];
+
+        try {
+            // If result is a Result type with Ok variant
+            if (result && typeof result === 'object' && 'Ok' in result) {
+                const okResult = result.Ok;
+                
+                // Handle double-wrapped Result
+                if (okResult && typeof okResult === 'object' && 'Ok' in okResult) {
+                    return Array.isArray(okResult.Ok) ? okResult.Ok : [];
+                }
+                
+                // Handle single-wrapped Result
+                return Array.isArray(okResult) ? okResult : [];
+            }
+            
+            // If result is already an array
+            if (Array.isArray(result)) {
+                return result;
+            }
+
+            console.warn('Unexpected response format:', result);
+            return [];
+        } catch (error) {
+            console.error('Error parsing models response:', error);
+            return [];
+        }
+    }
+
+    updateModelSelect(modelSelect, models) {
+        // Log the models being processed
+        console.log('Updating model select with models:', models);
+
+        if (!Array.isArray(models)) {
+            console.error('Models is not an array:', models);
+            modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            modelSelect.disabled = true;
+            return;
+        }
+
+        const options = models.map(model => {
+            const modelName = typeof model === 'string' ? model : 
+                            (model && model.name) ? model.name : 
+                            String(model);
+            return `<option value="${modelName}">${modelName}</option>`;
+        }).join('');
+
+        modelSelect.innerHTML = '<option value="">Select Model</option>' + options;
+        modelSelect.disabled = false;
+    }
+
+    createToolsSection() {
+        const toolsContainer = document.createElement('div');
+        toolsContainer.className = 'tools-container';
+        toolsContainer.innerHTML = `
+            <div class="tools-header">Available Tools</div>
+            <div class="tools-list">
+                <label><input type="checkbox" value="web_search"> Web Search</label>
+                <label><input type="checkbox" value="code_analysis"> Code Analysis</label>
+                <label><input type="checkbox" value="file_operations"> File Operations</label>
+                <label><input type="checkbox" value="data_processing"> Data Processing</label>
+            </div>
+        `;
+        return toolsContainer;
+    }
+
+    createParametersSection() {
+        const paramsContainer = document.createElement('div');
+        paramsContainer.className = 'params-container';
+        paramsContainer.innerHTML = `
+            <div class="params-header">Parameters</div>
+            <div class="param-item">
+                <label>Temperature:</label>
+                <input type="range" min="0" max="100" value="70" class="param-slider">
+                <span class="param-value">0.7</span>
+            </div>
+            <div class="param-item">
+                <label>Max Tokens:</label>
+                <input type="number" value="2048" min="1" max="8192" class="param-input">
+            </div>
+        `;
+
+        // Add event listener for temperature slider
+        const slider = paramsContainer.querySelector('.param-slider');
+        const value = paramsContainer.querySelector('.param-value');
+        slider.addEventListener('input', (e) => {
+            value.textContent = (e.target.value / 100).toFixed(2);
+        });
+
+        return paramsContainer;
     }
 
     addNode(type = 'llm') {
@@ -175,6 +253,8 @@ class ReteEditor {
                 // Set position
                 node.style.left = `${Math.random() * (this.container.clientWidth - 300)}px`;
                 node.style.top = `${Math.random() * (this.container.clientHeight - 400)}px`;
+                node.style.width = '300px';
+                node.style.height = '400px';
 
                 // Add header with controls
                 const header = document.createElement('div');
@@ -198,6 +278,11 @@ class ReteEditor {
                 const content = this.createNodeContent(type);
                 node.appendChild(content);
 
+                // Add resize handle
+                const resizeHandle = document.createElement('div');
+                resizeHandle.className = 'resize-handle';
+                node.appendChild(resizeHandle);
+
                 // Add connection points
                 const inputPoint = document.createElement('div');
                 inputPoint.className = 'connection-point input-point';
@@ -213,6 +298,9 @@ class ReteEditor {
 
                 // Make node draggable
                 this.makeDraggable(node);
+
+                // Add resize handling
+                this.makeResizable(node, resizeHandle);
 
                 // Add connection handling
                 this.setupConnectionPoints(node);
@@ -231,6 +319,46 @@ class ReteEditor {
         const outputPoint = node.querySelector('.output-point');
         let isConnecting = false;
         let tempLine = null;
+        let rafId = null;
+
+        const createSVG = () => {
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.style.position = 'absolute';
+            svg.style.top = '0';
+            svg.style.left = '0';
+            svg.style.width = '100%';
+            svg.style.height = '100%';
+            svg.style.pointerEvents = 'none';
+            svg.style.willChange = 'transform';
+            
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('stroke', '#646cff');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('fill', 'none');
+            
+            svg.appendChild(path);
+            return svg;
+        };
+
+        const updateLine = (e, startX, startY) => {
+            if (!isConnecting || !tempLine) return;
+            
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+            }
+
+            rafId = requestAnimationFrame(() => {
+                const endX = e.clientX - this.container.getBoundingClientRect().left;
+                const endY = e.clientY - this.container.getBoundingClientRect().top;
+                const dx = endX - startX;
+                const dy = endY - startY;
+                
+                const path = tempLine.querySelector('path');
+                path.setAttribute('d', `M ${startX} ${startY} C ${startX + dx/2} ${startY}, ${startX + dx/2} ${endY}, ${endX} ${endY}`);
+                
+                rafId = null;
+            });
+        };
 
         outputPoint.addEventListener('mousedown', (e) => {
             isConnecting = true;
@@ -238,40 +366,26 @@ class ReteEditor {
             const startX = rect.left + rect.width / 2 - this.container.getBoundingClientRect().left;
             const startY = rect.top + rect.height / 2 - this.container.getBoundingClientRect().top;
 
-            tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            tempLine.style.position = 'absolute';
-            tempLine.style.top = '0';
-            tempLine.style.left = '0';
-            tempLine.style.width = '100%';
-            tempLine.style.height = '100%';
-            tempLine.style.pointerEvents = 'none';
-            
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('stroke', '#646cff');
-            path.setAttribute('stroke-width', '2');
-            path.setAttribute('fill', 'none');
-            
-            tempLine.appendChild(path);
+            tempLine = createSVG();
             this.container.appendChild(tempLine);
 
-            const updateLine = (e) => {
-                if (!isConnecting) return;
-                const endX = e.clientX - this.container.getBoundingClientRect().left;
-                const endY = e.clientY - this.container.getBoundingClientRect().top;
-                const dx = endX - startX;
-                const dy = endY - startY;
-                const path = tempLine.querySelector('path');
-                path.setAttribute('d', `M ${startX} ${startY} C ${startX + dx/2} ${startY}, ${startX + dx/2} ${endY}, ${endX} ${endY}`);
-            };
+            const moveHandler = (e) => updateLine(e, startX, startY);
+            document.addEventListener('mousemove', moveHandler, { passive: true });
 
-            document.addEventListener('mousemove', updateLine);
-            document.addEventListener('mouseup', () => {
-                document.removeEventListener('mousemove', updateLine);
+            const cleanup = () => {
+                document.removeEventListener('mousemove', moveHandler);
                 if (tempLine) {
                     tempLine.remove();
                 }
+                if (rafId) {
+                    cancelAnimationFrame(rafId);
+                    rafId = null;
+                }
                 isConnecting = false;
-            }, { once: true });
+                tempLine = null;
+            };
+
+            document.addEventListener('mouseup', cleanup, { once: true });
         });
 
         inputPoint.addEventListener('mouseup', (e) => {
@@ -289,19 +403,48 @@ class ReteEditor {
 
     drawConnections() {
         // Remove existing connection lines
-        this.container.querySelectorAll('.connection-line').forEach(line => line.remove());
+        const existingLines = this.container.querySelectorAll('.connection-line');
+        existingLines.forEach(line => line.remove());
 
-        // Redraw all connections
+        // Create a single SVG for all connections
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.style.position = 'absolute';
+        svg.style.top = '0';
+        svg.style.left = '0';
+        svg.style.width = '100%';
+        svg.style.height = '100%';
+        svg.style.pointerEvents = 'none';
+        svg.classList.add('connection-line');
+
+        // Draw all connections in a single batch
         this.connections.forEach(conn => {
             const fromNode = this.container.querySelector(`#${conn.from}`);
             const toNode = this.container.querySelector(`#${conn.to}`);
+            
             if (fromNode && toNode) {
                 const fromPoint = fromNode.querySelector('.output-point');
                 const toPoint = toNode.querySelector('.input-point');
-                // Create and add connection line
-                // ... (implementation similar to temporary line creation)
+                
+                const fromRect = fromPoint.getBoundingClientRect();
+                const toRect = toPoint.getBoundingClientRect();
+                const containerRect = this.container.getBoundingClientRect();
+                
+                const startX = fromRect.left + fromRect.width / 2 - containerRect.left;
+                const startY = fromRect.top + fromRect.height / 2 - containerRect.top;
+                const endX = toRect.left + toRect.width / 2 - containerRect.left;
+                const endY = toRect.top + toRect.height / 2 - containerRect.top;
+                
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('stroke', '#646cff');
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('d', `M ${startX} ${startY} C ${startX} ${startY + 50}, ${endX} ${endY - 50}, ${endX} ${endY}`);
+                
+                svg.appendChild(path);
             }
         });
+
+        this.container.appendChild(svg);
     }
 
     runNode(node) {
@@ -346,22 +489,33 @@ class ReteEditor {
         let currentY;
         let initialX;
         let initialY;
+        let rafId = null;
 
         node.addEventListener('mousedown', (e) => {
             if (e.target.closest('.node-controls, .node-select, .node-input, .tools-list, .params-container')) {
-                return; // Don't initiate drag on controls
+                return;
             }
             isDragging = true;
             node.classList.add('dragging');
             
             initialX = e.clientX - node.offsetLeft;
             initialY = e.clientY - node.offsetTop;
+            
+            // Force hardware acceleration
+            node.style.willChange = 'transform';
         });
 
         document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                e.preventDefault();
-                
+            if (!isDragging) return;
+            e.preventDefault();
+            
+            // Cancel any existing animation frame
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+            }
+
+            // Schedule the update
+            rafId = requestAnimationFrame(() => {
                 currentX = e.clientX - initialX;
                 currentY = e.clientY - initialY;
 
@@ -369,18 +523,94 @@ class ReteEditor {
                 currentX = Math.max(0, Math.min(currentX, this.container.clientWidth - node.offsetWidth));
                 currentY = Math.max(0, Math.min(currentY, this.container.clientHeight - node.offsetHeight));
 
-                node.style.left = `${currentX}px`;
-                node.style.top = `${currentY}px`;
+                // Use transform instead of left/top for better performance
+                node.style.transform = `translate(${currentX}px, ${currentY}px)`;
                 
-                // Update connections
-                this.drawConnections();
-            }
-        });
+                rafId = null;
+            });
+        }, { passive: true });
 
         document.addEventListener('mouseup', () => {
+            if (!isDragging) return;
+            
             isDragging = false;
             node.classList.remove('dragging');
+            node.style.willChange = 'auto';
+            
+            // Convert transform to left/top for final position
+            const transform = new WebKitCSSMatrix(window.getComputedStyle(node).transform);
+            node.style.transform = 'none';
+            node.style.left = `${transform.m41}px`;
+            node.style.top = `${transform.m42}px`;
+            
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
         });
+    }
+
+    makeResizable(node, handle) {
+        let isResizing = false;
+        let startWidth, startHeight, startX, startY;
+        let rafId = null;
+
+        const startResize = (e) => {
+            if (e.button !== 0) return;
+            isResizing = true;
+            handle.classList.add('resizing');
+            
+            startWidth = node.offsetWidth;
+            startHeight = node.offsetHeight;
+            startX = e.clientX;
+            startY = e.clientY;
+            
+            // Force hardware acceleration
+            node.style.willChange = 'width, height';
+            
+            e.preventDefault();
+            e.stopPropagation();
+        };
+
+        const doResize = (e) => {
+            if (!isResizing) return;
+            e.preventDefault();
+
+            // Cancel any existing animation frame
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+            }
+
+            // Schedule the update
+            rafId = requestAnimationFrame(() => {
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+
+                const newWidth = Math.max(300, Math.min(800, startWidth + dx));
+                const newHeight = Math.max(300, Math.min(800, startHeight + dy));
+
+                node.style.width = `${newWidth}px`;
+                node.style.height = `${newHeight}px`;
+                
+                rafId = null;
+            });
+        };
+
+        const stopResize = () => {
+            if (!isResizing) return;
+            isResizing = false;
+            handle.classList.remove('resizing');
+            node.style.willChange = 'auto';
+            
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        };
+
+        handle.addEventListener('mousedown', startResize);
+        document.addEventListener('mousemove', doResize, { passive: true });
+        document.addEventListener('mouseup', stopResize);
     }
 
     clear() {

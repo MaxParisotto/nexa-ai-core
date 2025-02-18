@@ -15,6 +15,46 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  position: fixed;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  padding-bottom: 30px; /* Make room for status bar */
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+.canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background-color: #2f2f2f;
+  touch-action: none; /* Prevents touch scrolling */
+  user-select: none; /* Prevents text selection during drag */
+}
+
+#rete {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  touch-action: none;
+  user-select: none;
 }
 
 .container {
@@ -263,8 +303,8 @@ body {
 .modal-header {
     cursor: move;
     padding: 12px;
-    background: #f8f8f8;
-    border-bottom: 1px solid #eee;
+    background: #1f1f1f;
+    border-bottom: 1px solid #3f3f3f;
     border-radius: 12px 12px 0 0;
     display: flex;
     justify-content: space-between;
@@ -276,38 +316,27 @@ body {
 .modal-header h2 {
     margin: 0;
     font-size: 1.2em;
+    color: #ffffff;
 }
 
 .resize-handle {
     position: absolute;
-    width: 20px;
-    height: 20px;
-    bottom: 0;
     right: 0;
+    bottom: 0;
+    width: 15px;
+    height: 15px;
     cursor: se-resize;
     z-index: 1000;
+    background: linear-gradient(135deg, transparent 50%, #646cff 50%);
+    border-radius: 0 0 8px 0;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    pointer-events: all;
 }
 
-.resize-handle::before {
-    content: '';
-    position: absolute;
-    right: 3px;
-    bottom: 3px;
-    width: 12px;
-    height: 12px;
-    border-right: 2px solid #666;
-    border-bottom: 2px solid #666;
-}
-
-@media (prefers-color-scheme: dark) {
-    .modal-header {
-        background: #1f1f1f;
-        border-bottom-color: #3f3f3f;
-    }
-
-    .resize-handle::before {
-        border-color: #999;
-    }
+.resize-handle:hover,
+.resize-handle.resizing {
+    opacity: 1;
 }
 
 .modal-content h2 {
@@ -1239,28 +1268,6 @@ optgroup {
     }
 }
 
-.app-container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    width: 100vw;
-    overflow: hidden;
-    padding-bottom: 30px; /* Make room for status bar */
-}
-
-.canvas-container {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-    background-color: #2f2f2f;
-}
-
-#rete {
-    width: 100%;
-    height: 100%;
-    position: relative;
-}
-
 .editor-controls {
     position: absolute;
     top: 16px;
@@ -1304,14 +1311,15 @@ optgroup {
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     cursor: move;
     user-select: none;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease;
     color: #ffffff;
     display: flex;
     flex-direction: column;
     overflow: visible;
-    resize: both;
     min-width: 300px;
     min-height: 300px;
+    max-width: 800px;
+    max-height: 800px;
 }
 
 .rete-node:hover {
@@ -1377,25 +1385,25 @@ optgroup {
     gap: 12px;
     overflow-y: auto;
     height: calc(100% - 40px);
-    min-height: 200px;
     background: #1f1f1f;
 }
 
-.node-select-container {
-    position: relative;
-    width: 100%;
-    z-index: 100;
+.node-inputs-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
 .node-select {
     background: #2f2f2f;
     border: 1px solid #3f3f3f;
     color: #ffffff;
-    padding: 8px 10px;
-    border-radius: 4px;
+    padding: 8px 12px;
+    border-radius: 6px;
     width: 100%;
-    font-size: 13px;
+    font-size: 14px;
     appearance: none;
+    -webkit-appearance: none;
 }
 
 .node-select:hover {
@@ -1407,23 +1415,22 @@ optgroup {
     border-color: #646cff;
 }
 
-.node-select option,
-.node-select optgroup {
-    background: #2f2f2f;
-    color: #ffffff;
-    padding: 8px;
+.select-wrapper {
+    position: relative;
+    width: 100%;
 }
 
 .node-input {
     background: #2f2f2f;
     border: 1px solid #3f3f3f;
     color: #ffffff;
-    padding: 8px;
-    border-radius: 4px;
+    padding: 12px;
+    border-radius: 6px;
     width: 100%;
-    min-height: 60px;
+    min-height: 100px;
     resize: vertical;
-    font-size: 13px;
+    font-size: 14px;
+    font-family: inherit;
 }
 
 .node-input:hover {
@@ -1435,65 +1442,28 @@ optgroup {
     border-color: #646cff;
 }
 
-.tools-container, .params-container {
-    background: #2f2f2f;
-    border: 1px solid #3f3f3f;
-    border-radius: 4px;
-    padding: 8px;
-}
-
-.tools-header, .params-header {
-    font-size: 12px;
-    font-weight: 500;
-    color: #9ca3af;
-    margin-bottom: 6px;
-}
-
-.tools-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.tools-list label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: #ffffff;
-    cursor: pointer;
-}
-
-.tools-list input[type="checkbox"] {
-    width: 14px;
-    height: 14px;
-    border: 1px solid #3f3f3f;
-    border-radius: 2px;
-    background: #2f2f2f;
-}
-
-.param-item {
+.param-row {
     display: grid;
-    grid-template-columns: 100px 1fr auto;
+    grid-template-columns: auto 1fr auto;
     align-items: center;
     gap: 12px;
-    margin-bottom: 8px;
     padding: 8px;
-    background: rgba(47, 47, 47, 0.5);
-    border-radius: 4px;
-    min-width: 0;
+    background: #2f2f2f;
+    border-radius: 6px;
+    border: 1px solid #3f3f3f;
 }
 
-.param-item label {
-    font-size: 13px;
+.param-row label {
+    font-size: 14px;
     color: #ffffff;
-    min-width: 100px;
+    white-space: nowrap;
 }
 
 .param-slider {
-    flex: 1;
-    height: 4px;
     -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
     background: #3f3f3f;
     border-radius: 2px;
     outline: none;
@@ -1501,101 +1471,49 @@ optgroup {
 
 .param-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 12px;
-    height: 12px;
+    appearance: none;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     background: #646cff;
     cursor: pointer;
     border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .param-value {
-    font-size: 13px;
+    font-size: 14px;
     color: #9ca3af;
     min-width: 40px;
     text-align: right;
 }
 
-.param-input {
-    background: #2f2f2f;
-    border: 1px solid #3f3f3f;
-    color: #ffffff;
-    padding: 4px 8px;
-    border-radius: 4px;
-    width: 80px;
-    font-size: 13px;
-}
-
-.connection-point {
+.loading-indicator {
     position: absolute;
-    width: 12px;
-    height: 12px;
-    background: #2f2f2f;
-    border: 2px solid #646cff;
-    border-radius: 50%;
-    cursor: pointer;
-    z-index: 1;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: #9ca3af;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
-.input-point {
-    top: -6px;
-    left: 50%;
-    transform: translateX(-50%);
-}
-
-.output-point {
-    bottom: -6px;
-    left: 50%;
-    transform: translateX(-50%);
-}
-
-.connection-point:hover {
-    background: #646cff;
-}
-
-/* Light mode overrides */
 @media (prefers-color-scheme: light) {
-    .rete-node {
+    .node-content {
         background: #ffffff;
-        border-color: #ddd;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        color: #1f1f1f;
-    }
-
-    .node-header {
-        background: #f0f0f0;
-        border-bottom-color: #ddd;
-        color: #1f1f1f;
-    }
-
-    .node-btn {
-        color: #1f1f1f;
-    }
-
-    .node-btn:hover {
-        background: #e0e0e0;
     }
 
     .node-select,
     .node-input,
-    .tools-container,
-    .params-container,
-    .param-input {
-        background: #ffffff;
+    .param-row {
+        background: #f5f5f5;
         border-color: #ddd;
         color: #1f1f1f;
     }
 
-    .tools-header,
-    .params-header {
-        color: #666;
-    }
-
-    .tools-list label {
-        color: #1f1f1f;
-    }
-
-    .param-item label {
+    .param-row label {
         color: #1f1f1f;
     }
 
@@ -1606,73 +1524,4 @@ optgroup {
     .param-value {
         color: #666;
     }
-
-    .connection-point {
-        background: #ffffff;
-        border-color: #646cff;
-    }
-
-    .node-select option,
-    .node-select optgroup {
-        background: #ffffff;
-        color: #1f1f1f;
-    }
-
-    .param-item {
-        background: rgba(240, 240, 240, 0.5);
-    }
-}
-
-/* Status bar styles */
-// ... existing status bar styles ...
-
-.loading-indicator {
-    font-size: 12px;
-    color: #9ca3af;
-    margin: 4px 0;
-    text-align: center;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-}
-
-.loading-indicator::after {
-    content: '';
-    width: 12px;
-    height: 12px;
-    border: 2px solid #646cff;
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-color-scheme: light) {
-    .loading-indicator {
-        color: #666;
-    }
-}
-
-.rete-node::after {
-    content: '';
-    position: absolute;
-    right: 2px;
-    bottom: 2px;
-    width: 10px;
-    height: 10px;
-    cursor: se-resize;
-    border-right: 2px solid #646cff;
-    border-bottom: 2px solid #646cff;
-    opacity: 0.5;
-    pointer-events: none;
-}
-
-.rete-node:hover::after {
-    opacity: 1;
 }
