@@ -225,8 +225,11 @@ fn LogViewer() -> impl IntoView {
     let (selected_level, _set_selected_level) = signal(String::from("all"));
     let (auto_scroll, _set_auto_scroll) = signal(true);
     let (position, set_position) = signal(ModalPosition { x: 100, y: 100 });
+    let (dimensions, set_dimensions) = signal((800, 600));
     let (is_dragging, set_is_dragging) = signal(false);
+    let (is_resizing, set_is_resizing) = signal(false);
     let (drag_start, set_drag_start) = signal(ModalPosition { x: 0, y: 0 });
+    let (resize_start, set_resize_start) = signal((0, 0));
 
     let handle_mouse_down = move |ev: web_sys::MouseEvent| {
         if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() {
@@ -235,6 +238,17 @@ fn LogViewer() -> impl IntoView {
                 x: ev.client_x() - position.get().x,
                 y: ev.client_y() - position.get().y,
             });
+            ev.prevent_default();
+            ev.stop_propagation();
+        } else if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".resize-handle").is_ok() {
+            set_is_resizing.set(true);
+            let (width, height) = dimensions.get();
+            set_resize_start.set((
+                ev.client_x() - width,
+                ev.client_y() - height
+            ));
+            ev.prevent_default();
+            ev.stop_propagation();
         }
     };
 
@@ -245,11 +259,25 @@ fn LogViewer() -> impl IntoView {
                 x: ev.client_x() - start.x,
                 y: ev.client_y() - start.y,
             });
+            ev.prevent_default();
+            ev.stop_propagation();
+        } else if is_resizing.get() {
+            let (start_x, start_y) = resize_start.get();
+            let new_width = (ev.client_x() - start_x).max(400);
+            let new_height = (ev.client_y() - start_y).max(300);
+            set_dimensions.set((new_width, new_height));
+            ev.prevent_default();
+            ev.stop_propagation();
         }
     };
 
-    let handle_mouse_up = move |_| {
-        set_is_dragging.set(false);
+    let handle_mouse_up = move |ev: web_sys::MouseEvent| {
+        if is_dragging.get() || is_resizing.get() {
+            set_is_dragging.set(false);
+            set_is_resizing.set(false);
+            ev.prevent_default();
+            ev.stop_propagation();
+        }
     };
 
     // Fetch logs periodically
@@ -335,10 +363,14 @@ fn LogViewer() -> impl IntoView {
                 on:mousedown=handle_mouse_down
                 on:mousemove=handle_mouse_move
                 on:mouseup=handle_mouse_up
+                on:mouseleave=handle_mouse_up
                 style:left=move || format!("{}px", position.get().x)
                 style:top=move || format!("{}px", position.get().y)
             >
-                <div class="modal-content logs-content">
+                <div class="modal-content logs-content"
+                    style:width=move || format!("{}px", dimensions.get().0)
+                    style:height=move || format!("{}px", dimensions.get().1)
+                >
                     <div class="modal-header">
                         <h2>"System Logs"</h2>
                         <div class="logs-actions">
@@ -431,8 +463,11 @@ fn StatusBar() -> impl IntoView {
     let (server_statuses, set_server_statuses) = signal(std::collections::HashMap::new());
 
     let (settings_position, set_settings_position) = signal(ModalPosition { x: 200, y: 100 });
+    let (settings_dimensions, set_settings_dimensions) = signal((500, 400));
     let (is_dragging, set_is_dragging) = signal(false);
+    let (is_resizing, set_is_resizing) = signal(false);
     let (drag_start, set_drag_start) = signal(ModalPosition { x: 0, y: 0 });
+    let (resize_start, set_resize_start) = signal((0, 0));
 
     let handle_mouse_down = move |ev: web_sys::MouseEvent| {
         if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() {
@@ -441,6 +476,11 @@ fn StatusBar() -> impl IntoView {
                 x: ev.client_x() - settings_position.get().x,
                 y: ev.client_y() - settings_position.get().y,
             });
+        } else if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".resize-handle").is_ok() {
+            set_is_resizing.set(true);
+            let (width, height) = settings_dimensions.get();
+            set_resize_start.set((ev.client_x() - width, ev.client_y() - height));
+            ev.prevent_default();
         }
     };
 
@@ -451,11 +491,18 @@ fn StatusBar() -> impl IntoView {
                 x: ev.client_x() - start.x,
                 y: ev.client_y() - start.y,
             });
+        } else if is_resizing.get() {
+            let (start_x, start_y) = resize_start.get();
+            let new_width = (ev.client_x() - start_x).max(400);
+            let new_height = (ev.client_y() - start_y).max(300);
+            set_settings_dimensions.set((new_width, new_height));
+            ev.prevent_default();
         }
     };
 
     let handle_mouse_up = move |_| {
         set_is_dragging.set(false);
+        set_is_resizing.set(false);
     };
 
     let toggle_settings = move |_| set_show_settings.update(|s| *s = !*s);
@@ -771,7 +818,10 @@ fn StatusBar() -> impl IntoView {
                 style:left=move || format!("{}px", settings_position.get().x)
                 style:top=move || format!("{}px", settings_position.get().y)
             >
-                <div class="modal-content settings-content">
+                <div class="modal-content settings-content"
+                    style:width=move || format!("{}px", settings_dimensions.get().0)
+                    style:height=move || format!("{}px", settings_dimensions.get().1)
+                >
                     <div class="modal-header">
                         <h2>"LLM Settings"</h2>
                         <button class="close-btn" on:click=move |_| set_show_settings.set(false)>

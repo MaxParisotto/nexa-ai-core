@@ -15,11 +15,11 @@ class ReteEditor {
         this.container.style.overflow = 'hidden';
     }
 
-    createNodeContent(nodeType = 'llm') {
+    createNodeContent(type = 'llm') {
         const content = document.createElement('div');
         content.className = 'node-content';
 
-        switch (nodeType) {
+        switch (type) {
             case 'llm':
                 // Server selection
                 const serverSelect = document.createElement('select');
@@ -30,11 +30,17 @@ class ReteEditor {
                     <option value="http://localhost:11434">Ollama</option>
                 `;
 
+                // Model selection container
+                const modelSelectContainer = document.createElement('div');
+                modelSelectContainer.className = 'node-select-container';
+
                 // Model selection
                 const modelSelect = document.createElement('select');
                 modelSelect.className = 'node-select model-select';
                 modelSelect.innerHTML = '<option value="">Select Model</option>';
                 modelSelect.disabled = true;
+
+                modelSelectContainer.appendChild(modelSelect);
 
                 // Loading indicator
                 const loadingIndicator = document.createElement('div');
@@ -146,7 +152,7 @@ class ReteEditor {
 
                 // Add all elements to content
                 content.appendChild(serverSelect);
-                content.appendChild(modelSelect);
+                content.appendChild(modelSelectContainer);
                 content.appendChild(loadingIndicator);
                 content.appendChild(taskInput);
                 content.appendChild(toolsContainer);

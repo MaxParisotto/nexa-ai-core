@@ -141,7 +141,7 @@ button {
 }
 
 .status-select {
-    background: transparent;
+    background: #2f2f2f;
     border: 1px solid #3f3f3f;
     color: #ffffff;
     font-size: 13px;
@@ -149,6 +149,11 @@ button {
     border-radius: 4px;
     width: 100%;
     cursor: pointer;
+    transition: border-color 0.2s;
+    box-shadow: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
 }
 
 .status-select:hover {
@@ -164,11 +169,12 @@ button {
 .status-select optgroup {
     background: #2f2f2f;
     color: #ffffff;
+    padding: 4px 8px;
 }
 
 @media (prefers-color-scheme: light) {
     .status-select {
-        background: transparent;
+        background: #ffffff;
         border-color: #ddd;
         color: #2f2f2f;
     }
@@ -237,22 +243,21 @@ body {
 
 .modal-content {
     pointer-events: auto;
-    position: fixed;
+    position: absolute;
     background: #ffffff;
     padding: 24px;
     border-radius: 12px;
     min-width: 400px;
     min-height: 300px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
 }
 
 .modal.logs-modal .modal-content,
 .modal.settings-modal .modal-content {
-    position: fixed;
-    resize: both;
-    overflow: auto;
-    min-width: 400px;
-    min-height: 300px;
+    position: absolute;
+    overflow: hidden;
 }
 
 .modal-header {
@@ -265,6 +270,7 @@ body {
     justify-content: space-between;
     align-items: center;
     user-select: none;
+    flex-shrink: 0;
 }
 
 .modal-header h2 {
@@ -279,6 +285,7 @@ body {
     bottom: 0;
     right: 0;
     cursor: se-resize;
+    z-index: 1000;
 }
 
 .resize-handle::before {
@@ -424,16 +431,31 @@ body {
     position: relative;
 }
 
-.model-select {
+.node-select {
+    background: #2f2f2f;
+    border: 1px solid #3f3f3f;
+    color: #ffffff;
+    padding: 8px 10px;
+    border-radius: 4px;
     width: 100%;
-    padding: 6px 8px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    background: white;
-    color: #2f2f2f;
-    font-size: 0.9em;
+    font-size: 13px;
     appearance: none;
-    padding-right: 24px;
+}
+
+.node-select:hover {
+    border-color: #646cff;
+}
+
+.node-select:focus {
+    outline: none;
+    border-color: #646cff;
+}
+
+.node-select option,
+.node-select optgroup {
+    background: #2f2f2f;
+    color: #ffffff;
+    padding: 8px;
 }
 
 .loading-spinner {
@@ -492,7 +514,7 @@ body {
     
     .form-group input,
     .form-group select,
-    .model-select {
+    .node-select {
         background: #2f2f2f;
         border-color: #3f3f3f;
         color: #ffffff;
@@ -539,14 +561,14 @@ optgroup {
 /* Add a subtle hover effect to inputs and selects */
 .form-group input:hover,
 .form-group select:hover,
-.model-select:hover {
+.node-select:hover {
     border-color: #646cff;
 }
 
 /* Add a subtle transition to all interactive elements */
 .form-group input,
 .form-group select,
-.model-select,
+.node-select,
 .add-server-btn,
 .remove-server-btn,
 .form-actions button {
@@ -1273,7 +1295,7 @@ optgroup {
 
 .rete-node {
     position: absolute;
-    width: 280px;
+    width: 300px;
     min-height: 100px;
     background: #1f1f1f;
     border: 1px solid #3f3f3f;
@@ -1286,6 +1308,10 @@ optgroup {
     color: #ffffff;
     display: flex;
     flex-direction: column;
+    overflow: visible;
+    resize: both;
+    min-width: 300px;
+    min-height: 300px;
 }
 
 .rete-node:hover {
@@ -1345,20 +1371,31 @@ optgroup {
 }
 
 .node-content {
-    padding: 12px;
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
+    overflow-y: auto;
+    height: calc(100% - 40px);
+    min-height: 200px;
+    background: #1f1f1f;
+}
+
+.node-select-container {
+    position: relative;
+    width: 100%;
+    z-index: 100;
 }
 
 .node-select {
     background: #2f2f2f;
     border: 1px solid #3f3f3f;
     color: #ffffff;
-    padding: 6px 8px;
+    padding: 8px 10px;
     border-radius: 4px;
     width: 100%;
     font-size: 13px;
+    appearance: none;
 }
 
 .node-select:hover {
@@ -1368,6 +1405,13 @@ optgroup {
 .node-select:focus {
     outline: none;
     border-color: #646cff;
+}
+
+.node-select option,
+.node-select optgroup {
+    background: #2f2f2f;
+    color: #ffffff;
+    padding: 8px;
 }
 
 .node-input {
@@ -1429,10 +1473,15 @@ optgroup {
 }
 
 .param-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 100px 1fr auto;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
+    gap: 12px;
+    margin-bottom: 8px;
+    padding: 8px;
+    background: rgba(47, 47, 47, 0.5);
+    border-radius: 4px;
+    min-width: 0;
 }
 
 .param-item label {
@@ -1562,6 +1611,16 @@ optgroup {
         background: #ffffff;
         border-color: #646cff;
     }
+
+    .node-select option,
+    .node-select optgroup {
+        background: #ffffff;
+        color: #1f1f1f;
+    }
+
+    .param-item {
+        background: rgba(240, 240, 240, 0.5);
+    }
 }
 
 /* Status bar styles */
@@ -1598,4 +1657,22 @@ optgroup {
     .loading-indicator {
         color: #666;
     }
+}
+
+.rete-node::after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 10px;
+    height: 10px;
+    cursor: se-resize;
+    border-right: 2px solid #646cff;
+    border-bottom: 2px solid #646cff;
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.rete-node:hover::after {
+    opacity: 1;
 }
