@@ -7,6 +7,8 @@ use web_sys::console;
 use futures::future::join_all;
 use futures::future::FutureExt;
 use gloo_timers::future::TimeoutFuture;
+use leptos::html::ElementChild;
+use leptos::attr::custom::CustomAttribute;
 
 macro_rules! log {
     ($($t:tt)*) => {
@@ -93,6 +95,20 @@ struct LogEntry {
     message: String,
     timestamp: String,
     target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatCompletionRequest {
+    #[serde(rename = "server_url")]
+    server_url: String,
+    model: String,
+    message: String,
 }
 
 #[component]
@@ -351,52 +367,6 @@ fn LogViewer() -> impl IntoView {
 }
 
 #[component]
-fn ChatModal() -> impl IntoView {
-    let (messages, set_messages) = signal(Vec::new());
-    let (input_value, set_input_value) = signal(String::new());
-
-    let send_message = move |ev: SubmitEvent| {
-        ev.prevent_default();
-        let message = input_value.get();
-        if message.is_empty() {
-            return;
-        }
-
-        // TODO: Implement message sending logic
-        set_messages.update(|msgs| {
-            msgs.push(format!("User: {}", message));
-        });
-        set_input_value.set(String::new());
-    };
-
-    view! {
-        <div class="chat-container">
-            <div class="chat-messages">
-                {move || messages.get().into_iter().map(|msg| {
-                    view! {
-                        <div class="chat-message">{msg}</div>
-                    }
-                }).collect_view()}
-            </div>
-            <form class="chat-input-form" on:submit=send_message>
-                <input
-                    type="text"
-                    placeholder="Ask me anything..."
-                    value=move || input_value.get()
-                    on:input=move |ev| set_input_value.set(event_target_value(&ev))
-                />
-                <button type="submit">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="22" y1="2" x2="11" y2="13"/>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                    </svg>
-                </button>
-            </form>
-        </div>
-    }
-}
-
-#[component]
 fn StatusBar() -> impl IntoView {
     let (status, set_status) = signal(SystemStatus {
         active_connections: 0,
@@ -427,10 +397,8 @@ fn StatusBar() -> impl IntoView {
     });
     let (loading_models, set_loading_models) = signal(false);
     let (server_statuses, set_server_statuses) = signal(std::collections::HashMap::new());
-    let (show_chat, set_show_chat) = signal(false);
 
     let toggle_settings = move |_| set_show_settings.update(|s| *s = !*s);
-    let toggle_chat = move |_| set_show_chat.update(|s| *s = !*s);
     
     let add_server = move |provider: &str| {
         set_config.update(|c| {
@@ -456,6 +424,10 @@ fn StatusBar() -> impl IntoView {
     };
 
     let fetch_models = move || {
+        let set_loading_models = set_loading_models.clone();
+        let set_config = set_config.clone();
+        let config = config.clone();
+        
         spawn_local(async move {
             log!("Starting to fetch models from all configured servers");
             set_loading_models.set(true);
@@ -614,38 +586,27 @@ fn StatusBar() -> impl IntoView {
 
     // Update status every second
     let _ = Effect::new(move |_| {
-        set_interval(
-            move || {
-                spawn_local(async move {
-                    let args = serde_wasm_bindgen::to_value(&()).map_err(|e| format!("Failed to serialize: {}", e)).unwrap_or_else(|e| {
-                        log!("Error preparing status request: {}", e);
-                        JsValue::NULL
-                    });
-
-                    match invoke_with_timeout::<SystemStatus>("get_system_status", args, 5000).await {
-                        Ok(status) => set_status.set(status),
-                        Err(e) => log!("Failed to update status: {}", e),
-                    }
+        let status_update = async move {
+            let set_status = set_status.clone();
+            loop {
+                let args = serde_wasm_bindgen::to_value(&()).map_err(|e| format!("Failed to serialize: {}", e)).unwrap_or_else(|e| {
+                    log!("Error preparing status request: {}", e);
+                    JsValue::NULL
                 });
-            },
-            std::time::Duration::from_secs(1),
-        )
+
+                match invoke_with_timeout::<SystemStatus>("get_system_status", args, 5000).await {
+                    Ok(status) => set_status.set(status),
+                    Err(e) => log!("Failed to update status: {}", e),
+                }
+
+                TimeoutFuture::new(1000).await;
+            }
+        };
+        spawn_local(status_update);
     });
 
     view! {
         <div class="status-bar">
-            <div class="status-left">
-                <button 
-                    class="chat-btn"
-                    class:active=move || show_chat.get()
-                    on:click=toggle_chat 
-                    title="Chat with AI"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                    </svg>
-                </button>
-            </div>
             <span class="status-item">"Connections: " {move || status.get().active_connections}</span>
             <span class="status-item">"Uptime: " {move || status.get().uptime} "s"</span>
             <span class="status-item">"Memory: " {move || format!("{:.1}%", status.get().memory_usage)}</span>
@@ -879,23 +840,6 @@ fn StatusBar() -> impl IntoView {
                             <button type="submit">"Save Configuration"</button>
                         </div>
                     </form>
-                </div>
-            </div>
-        })}
-
-        {move || show_chat.get().then(|| view! {
-            <div class="modal chat-modal">
-                <div class="modal-content chat-content">
-                    <div class="chat-header">
-                        <h2>"Chat with AI"</h2>
-                        <button class="close-btn" on:click=move |_| set_show_chat.set(false)>
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
-                    </div>
-                    <ChatModal/>
                 </div>
             </div>
         })}

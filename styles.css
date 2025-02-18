@@ -975,21 +975,41 @@ optgroup {
 }
 
 .chat-message {
-    padding: 8px 12px;
-    border-radius: 8px;
+    padding: 12px 16px;
+    border-radius: 12px;
     max-width: 80%;
     word-break: break-word;
     line-height: 1.4;
+    margin: 4px 0;
+    font-size: 14px;
 }
 
-.chat-message:nth-child(odd) {
-    background: #f0f0f0;
-    align-self: flex-start;
-}
-
-.chat-message:nth-child(even) {
+.chat-message.user-message {
     background: #e3e8ff;
     align-self: flex-end;
+    color: #1a1a1a;
+}
+
+.chat-message.assistant-message {
+    background: #f0f0f0;
+    align-self: flex-start;
+    color: #1a1a1a;
+}
+
+.chat-message.error-message {
+    background: #fee2e2;
+    color: #dc2626;
+    align-self: center;
+    font-size: 13px;
+    padding: 8px 12px;
+}
+
+.chat-message.system-message {
+    background: #f0f0f0;
+    color: #666;
+    align-self: center;
+    font-size: 13px;
+    padding: 8px 12px;
 }
 
 .chat-input-form {
@@ -1039,6 +1059,34 @@ optgroup {
     height: 20px;
 }
 
+.chat-input-form button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.chat-input-form button.sending {
+    background: #646cff;
+    cursor: wait;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+.chat-input-form input:disabled {
+    background: #f5f5f5;
+    cursor: not-allowed;
+}
+
 @media (prefers-color-scheme: dark) {
     .chat-btn {
         color: #ffffff;
@@ -1062,12 +1110,24 @@ optgroup {
         background: #1f1f1f;
     }
 
-    .chat-message:nth-child(odd) {
-        background: #2f2f2f;
+    .chat-message.user-message {
+        background: #2a2a3f;
+        color: #ffffff;
     }
 
-    .chat-message:nth-child(even) {
-        background: #2a2a3f;
+    .chat-message.assistant-message {
+        background: #2f2f2f;
+        color: #ffffff;
+    }
+
+    .chat-message.error-message {
+        background: #422424;
+        color: #f87171;
+    }
+
+    .chat-message.system-message {
+        background: #2f2f2f;
+        color: #999;
     }
 
     .chat-input-form {

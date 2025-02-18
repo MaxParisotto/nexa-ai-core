@@ -1,12 +1,15 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
-use tauri::State;
-use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{State, Manager};
+use std::sync::{Mutex, Arc};
+use std::time::{SystemTime, UNIX_EPOCH, Instant};
 use reqwest::Client;
 use std::collections::VecDeque;
 use std::time::Duration;
 use tauri_plugin_log::Target;
+use serde_json;
+use tokio::time::sleep;
+use sysinfo::System;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LogEntry {
@@ -47,6 +50,43 @@ impl LogState {
         }
         self.entries.push_back(entry);
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct SystemState {
+    start_time: Instant,
+    active_connections: Arc<Mutex<usize>>,
+}
+
+impl SystemState {
+    fn new() -> Self {
+        Self {
+            start_time: Instant::now(),
+            active_connections: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    fn increment_connections(&self) {
+        if let Ok(mut count) = self.active_connections.lock() {
+            *count += 1;
+        }
+    }
+
+    fn decrement_connections(&self) {
+        if let Ok(mut count) = self.active_connections.lock() {
+            if *count > 0 {
+                *count -= 1;
+            }
+        }
+    }
+
+    fn get_connections(&self) -> usize {
+        self.active_connections.lock().map(|count| *count).unwrap_or(0)
+    }
+
+    fn get_uptime(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
     }
 }
 
@@ -99,6 +139,59 @@ struct OllamaModel {
 #[derive(Deserialize)]
 struct OllamaResponse {
     models: Vec<OllamaModel>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    stream: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatResponse {
+    message: Option<ChatMessage>,
+    choices: Option<Vec<Choice>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Choice {
+    message: ChatMessage,
+}
+
+#[derive(Debug, Serialize)]
+struct SystemStatus {
+    active_connections: usize,
+    uptime: u64,
+    memory_usage: f64,
+}
+
+#[tauri::command]
+async fn get_system_status(system_state: State<'_, SystemState>) -> Result<SystemStatus, String> {
+    let mut sys = System::new();
+    sys.refresh_memory();
+    
+    let total_memory = sys.total_memory() as f64;
+    let used_memory = sys.used_memory() as f64;
+    let memory_usage = if total_memory > 0.0 {
+        (used_memory / total_memory) * 100.0
+    } else {
+        0.0
+    };
+
+    Ok(SystemStatus {
+        active_connections: system_state.get_connections(),
+        uptime: system_state.get_uptime(),
+        memory_usage,
+    })
 }
 
 #[tauri::command]
@@ -216,12 +309,217 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+#[tauri::command]
+async fn chat_completion(server_url: String, model: String, message: String, log_state: State<'_, Mutex<LogState>>) -> Result<Result<String, String>, String> {
+    // Log function entry with all parameters
+    add_log_entry(&log_state, "debug", &format!(
+        "chat_completion called with server_url: {}, model: {}, message_length: {}",
+        server_url, model, message.len()
+    ), "chat")?;
+    
+    // Initial debug logs to confirm function entry and parameters
+    add_log_entry(&log_state, "debug", "Chat completion function called", "chat")?;
+    add_log_entry(&log_state, "info", &format!(
+        "Starting chat request with model: {}, server: {}",
+        model, server_url
+    ), "chat")?;
+    
+    // Log the request details
+    add_log_entry(&log_state, "debug", &format!(
+        "Chat request details:\nServer: {}\nModel: {}\nMessage length: {}\nMessage preview: {}...",
+        server_url,
+        model,
+        message.len(),
+        message.chars().take(100).collect::<String>()
+    ), "chat")?;
+
+    // Validate input parameters
+    if server_url.is_empty() || model.is_empty() || message.is_empty() {
+        let err = "Invalid parameters: server_url, model, and message must not be empty".to_string();
+        add_log_entry(&log_state, "error", &err, "chat")?;
+        return Ok(Err(err));
+    }
+
+    let base_url = server_url.trim_end_matches('/');
+    let is_ollama = base_url.contains("localhost:11434");
+    
+    let chat_url = if is_ollama {
+        format!("{}/api/chat", base_url)
+    } else {
+        if base_url.ends_with("/v1") {
+            format!("{}/chat/completions", base_url)
+        } else {
+            format!("{}/v1/chat/completions", base_url)
+        }
+    };
+
+    add_log_entry(&log_state, "info", &format!("Using {} API endpoint: {}", 
+        if is_ollama { "Ollama" } else { "OpenAI compatible" },
+        chat_url
+    ), "chat")?;
+
+    // Create HTTP client with custom settings
+    let client = match Client::builder()
+        .timeout(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(15))
+        .pool_max_idle_per_host(1)
+        .no_proxy()
+        .build() {
+            Ok(client) => {
+                add_log_entry(&log_state, "debug", "HTTP client created successfully", "chat")?;
+                client
+            },
+            Err(e) => {
+                let err = format!("Failed to create HTTP client: {}", e);
+                add_log_entry(&log_state, "error", &err, "chat")?;
+                return Ok(Err(err));
+            }
+        };
+
+    // Construct the request body
+    let chat_message = ChatMessage {
+        role: "user".to_string(),
+        content: message.clone(),
+    };
+
+    let request = if is_ollama {
+        ChatRequest {
+            model: model.clone(),
+            messages: vec![chat_message],
+            temperature: None,
+            stream: false,
+        }
+    } else {
+        ChatRequest {
+            model: model.clone(),
+            messages: vec![chat_message],
+            temperature: Some(0.7),
+            stream: false,
+        }
+    };
+
+    match serde_json::to_string_pretty(&request) {
+        Ok(json) => {
+            add_log_entry(&log_state, "debug", &format!("Request payload prepared:\n{}", json), "chat")?;
+        },
+        Err(e) => {
+            let err = format!("Failed to serialize request: {}", e);
+            add_log_entry(&log_state, "error", &err, "chat")?;
+            return Ok(Err(err));
+        }
+    };
+
+    // Send the request with retry logic
+    let mut retries = 2;
+    let mut last_error = None;
+
+    while retries > 0 {
+        add_log_entry(&log_state, "info", &format!("Sending request (attempt {})", 3 - retries), "chat")?;
+
+        let request_builder = client.post(&chat_url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json");
+
+        match request_builder.json(&request).send().await {
+            Ok(response) => {
+                let status = response.status();
+                add_log_entry(&log_state, "debug", &format!("Received response with status: {}", status), "chat")?;
+
+                if status.is_success() {
+                    let response_text = match response.text().await {
+                        Ok(text) => {
+                            add_log_entry(&log_state, "debug", &format!("Raw response received:\n{}", text), "chat")?;
+                            text
+                        },
+                        Err(e) => {
+                            let err = format!("Failed to read response body: {}", e);
+                            add_log_entry(&log_state, "error", &err, "chat")?;
+                            return Ok(Err(err));
+                        }
+                    };
+
+                    // Parse the response based on server type
+                    let content = if is_ollama {
+                        match serde_json::from_str::<ChatResponse>(&response_text) {
+                            Ok(ollama_response) => {
+                                match ollama_response.message {
+                                    Some(msg) => {
+                                        add_log_entry(&log_state, "info", "Successfully processed Ollama response", "chat")?;
+                                        msg.content
+                                    },
+                                    None => {
+                                        let err = "No message in Ollama response".to_string();
+                                        add_log_entry(&log_state, "error", &err, "chat")?;
+                                        return Ok(Err(err));
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                let err = format!("Failed to parse Ollama response: {}", e);
+                                add_log_entry(&log_state, "error", &format!("{}\nResponse text: {}", err, response_text), "chat")?;
+                                return Ok(Err(err));
+                            }
+                        }
+                    } else {
+                        match serde_json::from_str::<ChatResponse>(&response_text) {
+                            Ok(openai_response) => {
+                                match openai_response.choices.and_then(|c| c.first().cloned()) {
+                                    Some(choice) => {
+                                        add_log_entry(&log_state, "info", "Successfully processed OpenAI response", "chat")?;
+                                        choice.message.content
+                                    },
+                                    None => {
+                                        let err = "No choices in OpenAI response".to_string();
+                                        add_log_entry(&log_state, "error", &err, "chat")?;
+                                        return Ok(Err(err));
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                let err = format!("Failed to parse OpenAI response: {}", e);
+                                add_log_entry(&log_state, "error", &format!("{}\nResponse text: {}", err, response_text), "chat")?;
+                                return Ok(Err(err));
+                            }
+                        }
+                    };
+
+                    add_log_entry(&log_state, "info", "Chat request completed successfully", "chat")?;
+                    return Ok(Ok(content));
+                } else {
+                    let response_text = response.text().await.unwrap_or_default();
+                    let err = format!("Server returned error status: {} - {}", status, response_text);
+                    add_log_entry(&log_state, "error", &err, "chat")?;
+                    last_error = Some(err);
+                    retries -= 1;
+                }
+            }
+            Err(e) => {
+                let err = format!("Request failed: {}", e);
+                add_log_entry(&log_state, "error", &err, "chat")?;
+                last_error = Some(err);
+                retries -= 1;
+            }
+        }
+
+        if retries > 0 {
+            add_log_entry(&log_state, "info", &format!("Retrying in 1 second... ({} attempts remaining)", retries), "chat")?;
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    let final_error = last_error.unwrap_or_else(|| "Unknown error occurred".to_string());
+    add_log_entry(&log_state, "error", &format!("All retry attempts failed: {}", final_error), "chat")?;
+    Ok(Err(final_error))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let log_state = LogState::new();
+    let system_state = SystemState::new();
 
     tauri::Builder::default()
         .manage(Mutex::new(log_state))
+        .manage(system_state)
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_upload::init())
@@ -234,12 +532,14 @@ pub fn run() {
             .targets([
                 Target::new(tauri_plugin_log::TargetKind::Stdout),
                 Target::new(tauri_plugin_log::TargetKind::Webview),
-                Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None })
+                Target::new(tauri_plugin_log::TargetKind::LogDir { 
+                    file_name: Some("nexa-ai.log".into()) 
+                })
             ])
             .format(|out, message, record| {
                 out.finish(format_args!(
                     "{} [{}] [{}] {}",
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
                     record.level(),
                     record.target(),
                     message
@@ -252,12 +552,33 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let log_state = app.state::<Mutex<LogState>>();
+            let system_state = app.state::<SystemState>();
+            
+            // Initialize with startup log entries
+            if let Ok(mut state) = log_state.lock() {
+                let _ = state.add_entry(
+                    "info",
+                    "Application started",
+                    "system"
+                );
+                let _ = state.add_entry(
+                    "debug",
+                    "Registering Tauri commands: greet, get_logs, clear_logs, fetch_models_lmstudio, fetch_models_ollama, chat_completion, get_system_status",
+                    "system"
+                );
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             get_logs,
             clear_logs,
             fetch_models_lmstudio,
-            fetch_models_ollama
+            fetch_models_ollama,
+            chat_completion,
+            get_system_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
