@@ -7,10 +7,8 @@ class ReteEditor {
     }
 
     initializeEditor() {
-        // Add any necessary styles
         this.container.style.position = 'relative';
         this.container.style.overflow = 'hidden';
-        this.container.style.backgroundColor = '#f5f5f5';
     }
 
     addNode() {
@@ -19,30 +17,14 @@ class ReteEditor {
                 const node = document.createElement('div');
                 node.className = 'rete-node';
                 node.id = `node-${this.nextId++}`;
-                node.style.cssText = `
-                    position: absolute;
-                    width: 200px;
-                    min-height: 100px;
-                    background: white;
-                    border: 1px solid #ccc;
-                    border-radius: 8px;
-                    padding: 10px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    cursor: move;
-                    left: ${Math.random() * (this.container.clientWidth - 200)}px;
-                    top: ${Math.random() * (this.container.clientHeight - 100)}px;
-                `;
+                
+                // Set only position styles inline, let CSS handle the rest
+                node.style.left = `${Math.random() * (this.container.clientWidth - 200)}px`;
+                node.style.top = `${Math.random() * (this.container.clientHeight - 100)}px`;
 
                 // Add header
                 const header = document.createElement('div');
                 header.className = 'node-header';
-                header.style.cssText = `
-                    padding: 5px;
-                    background: #f0f0f0;
-                    border-radius: 6px 6px 0 0;
-                    margin-bottom: 10px;
-                    font-weight: bold;
-                `;
                 header.textContent = `Node ${this.nextId - 1}`;
                 node.appendChild(header);
 
@@ -67,7 +49,7 @@ class ReteEditor {
 
         node.addEventListener('mousedown', (e) => {
             isDragging = true;
-            node.style.cursor = 'grabbing';
+            node.classList.add('dragging');
             
             initialX = e.clientX - node.offsetLeft;
             initialY = e.clientY - node.offsetTop;
@@ -91,7 +73,7 @@ class ReteEditor {
 
         document.addEventListener('mouseup', () => {
             isDragging = false;
-            node.style.cursor = 'move';
+            node.classList.remove('dragging');
         });
     }
 
