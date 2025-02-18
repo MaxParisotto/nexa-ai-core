@@ -1,5 +1,11 @@
 {
   "emmet.includeLanguages": {
     "rust": "html"
+  },
+  "files.exclude": {
+    "**/.git": false,
+    "**/.hg": false,
+    "**/.svn": false,
+    "**/CVS": false
   }
 }

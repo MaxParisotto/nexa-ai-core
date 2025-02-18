@@ -67,12 +67,14 @@ impl SystemState {
         }
     }
 
+    #[allow(dead_code)]
     fn increment_connections(&self) {
         if let Ok(mut count) = self.active_connections.lock() {
             *count += 1;
         }
     }
 
+    #[allow(dead_code)]
     fn decrement_connections(&self) {
         if let Ok(mut count) = self.active_connections.lock() {
             if *count > 0 {
@@ -168,29 +170,89 @@ struct Choice {
 }
 
 #[derive(Debug, Serialize)]
+struct ProcessInfo {
+    name: String,
+    pid: u32,
+    cpu_usage: f32,
+    memory_usage: u64,
+    status: String,
+}
+
+#[derive(Debug, Serialize)]
 struct SystemStatus {
     active_connections: usize,
     uptime: u64,
     memory_usage: f64,
+    cpu_usage: f32,
+    processes: Vec<ProcessInfo>,
 }
 
 #[tauri::command]
 async fn get_system_status(system_state: State<'_, SystemState>) -> Result<SystemStatus, String> {
     let mut sys = System::new();
-    sys.refresh_memory();
     
+    // Refresh only what we need
+    sys.refresh_memory();
+    sys.refresh_cpu_all();
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from(std::process::id() as usize)]),
+        true,
+        sysinfo::ProcessRefreshKind::everything()
+    );
+    
+    // Get memory usage with error handling
     let total_memory = sys.total_memory() as f64;
-    let used_memory = sys.used_memory() as f64;
+    let used_memory = (total_memory - sys.available_memory() as f64) as f64;
     let memory_usage = if total_memory > 0.0 {
         (used_memory / total_memory) * 100.0
     } else {
         0.0
     };
+    
+    // Get CPU usage with error handling
+    let cpu_usage = if sys.cpus().is_empty() {
+        0.0
+    } else {
+        sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / sys.cpus().len() as f32
+    };
+    
+    // Get current process and its children with improved error handling
+    let current_pid = std::process::id() as usize;
+    let mut processes = Vec::new();
+    
+    if let Some(process) = sys.process(sysinfo::Pid::from(current_pid)) {
+        let process_info = ProcessInfo {
+            name: process.name().to_string_lossy().into_owned(),
+            pid: current_pid as u32,
+            cpu_usage: process.cpu_usage(),
+            memory_usage: process.memory(),
+            status: format!("{:?}", process.status()),
+        };
+        processes.push(process_info);
+        
+        // Get child processes with improved error handling
+        for (pid, proc) in sys.processes() {
+            if let Some(parent_pid) = proc.parent() {
+                if parent_pid == sysinfo::Pid::from(current_pid) {
+                    let child_info = ProcessInfo {
+                        name: proc.name().to_string_lossy().into_owned(),
+                        pid: pid.as_u32(),
+                        cpu_usage: proc.cpu_usage(),
+                        memory_usage: proc.memory(),
+                        status: format!("{:?}", proc.status()),
+                    };
+                    processes.push(child_info);
+                }
+            }
+        }
+    }
 
     Ok(SystemStatus {
         active_connections: system_state.get_connections(),
         uptime: system_state.get_uptime(),
         memory_usage,
+        cpu_usage,
+        processes,
     })
 }
 
@@ -512,6 +574,18 @@ async fn chat_completion(server_url: String, model: String, message: String, log
     Ok(Err(final_error))
 }
 
+#[tauri::command]
+async fn register_connection(system_state: State<'_, SystemState>) -> Result<(), String> {
+    system_state.increment_connections();
+    Ok(())
+}
+
+#[tauri::command]
+async fn unregister_connection(system_state: State<'_, SystemState>) -> Result<(), String> {
+    system_state.decrement_connections();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let log_state = LogState::new();
@@ -554,7 +628,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let log_state = app.state::<Mutex<LogState>>();
-            let system_state = app.state::<SystemState>();
+            let _system_state = app.state::<SystemState>();
             
             // Initialize with startup log entries
             if let Ok(mut state) = log_state.lock() {
@@ -578,7 +652,9 @@ pub fn run() {
             fetch_models_lmstudio,
             fetch_models_ollama,
             chat_completion,
-            get_system_status
+            get_system_status,
+            register_connection,
+            unregister_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -18,31 +18,147 @@
             font-size: 12px;
             display: flex;
             justify-content: space-between;
+            align-items: center;
         }
         .status-item {
             margin: 0 10px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .status-item .icon {
+            width: 14px;
+            height: 14px;
+            display: inline-block;
         }
         body {
-            margin-bottom: 30px; /* Make room for status bar */
+            margin-bottom: 30px;
+        }
+        #process-list {
+            display: none;
+            position: fixed;
+            bottom: 30px;
+            right: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+        }
+        #process-list.show {
+            display: block;
+        }
+        .process-item {
+            display: grid;
+            grid-template-columns: 200px 80px 100px 100px 100px;
+            gap: 10px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+            font-size: 12px;
+        }
+        .process-header {
+            font-weight: bold;
+            border-bottom: 2px solid #ddd;
+        }
+        @media (prefers-color-scheme: dark) {
+            #status-bar {
+                background: #1a1a1a;
+                border-top: 1px solid #333;
+                color: #fff;
+            }
+            #process-list {
+                background: #1a1a1a;
+                border: 1px solid #333;
+                color: #fff;
+            }
+            .process-item {
+                border-bottom: 1px solid #333;
+            }
+            .process-header {
+                border-bottom: 2px solid #444;
+            }
         }
     </style>
   </head>
   <body>
     <div id="status-bar">
-        <span class="status-item" id="connections">Connections: 0</span>
-        <span class="status-item" id="uptime">Uptime: 0s</span>
-        <span class="status-item" id="memory">Memory: 0%</span>
+        <div class="status-left">
+            <span class="status-item" id="connections">
+                <span class="icon">🔌</span>
+                <span>Connections: 0</span>
+            </span>
+            <span class="status-item" id="uptime">
+                <span class="icon">⏱️</span>
+                <span>Uptime: 0s</span>
+            </span>
+        </div>
+        <div class="status-right">
+            <span class="status-item" id="memory">
+                <span class="icon">📊</span>
+                <span>Memory: 0%</span>
+            </span>
+            <span class="status-item">
+                <button id="show-processes" style="background: none; border: none; cursor: pointer; padding: 2px 5px; border-radius: 3px;">
+                    <span class="icon">📋</span>
+                </button>
+            </span>
+        </div>
+    </div>
+
+    <div id="process-list">
+        <div class="process-item process-header">
+            <span>Name</span>
+            <span>PID</span>
+            <span>CPU</span>
+            <span>Memory</span>
+            <span>Status</span>
+        </div>
+        <div id="process-items"></div>
     </div>
 
     <script>
         const { invoke } = window.__TAURI__.tauri;
+        const processList = document.getElementById('process-list');
+        const showProcessesBtn = document.getElementById('show-processes');
+        let processListVisible = false;
+
+        showProcessesBtn.addEventListener('click', () => {
+            processListVisible = !processListVisible;
+            processList.classList.toggle('show', processListVisible);
+        });
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
 
         async function updateStatus() {
             try {
                 const status = await invoke('get_system_status');
-                document.getElementById('connections').textContent = `Connections: ${status.active_connections}`;
-                document.getElementById('uptime').textContent = `Uptime: ${Math.floor(status.uptime)}s`;
-                document.getElementById('memory').textContent = `Memory: ${status.memory_usage.toFixed(1)}%`;
+                
+                // Update basic stats
+                document.getElementById('connections').querySelector('span:last-child').textContent = `Connections: ${status.active_connections}`;
+                document.getElementById('uptime').querySelector('span:last-child').textContent = `Uptime: ${Math.floor(status.uptime)}s`;
+                document.getElementById('memory').querySelector('span:last-child').textContent = `Memory: ${status.memory_usage.toFixed(1)}%`;
+                
+                // Update process list if visible
+                if (processListVisible) {
+                    const processItems = document.getElementById('process-items');
+                    processItems.innerHTML = status.processes.map(proc => `
+                        <div class="process-item">
+                            <span>${proc.name}</span>
+                            <span>${proc.pid}</span>
+                            <span>${proc.cpu_usage.toFixed(1)}%</span>
+                            <span>${formatBytes(proc.memory_usage)}</span>
+                            <span>${proc.status}</span>
+                        </div>
+                    `).join('');
+                }
             } catch (e) {
                 console.error('Failed to update status:', e);
             }

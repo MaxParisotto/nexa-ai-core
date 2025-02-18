@@ -48,10 +48,23 @@ struct GreetArgs<'a> {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
+struct ProcessInfo {
+    name: String,
+    pid: u32,
+    cpu_usage: f32,
+    memory_usage: u64,
+    status: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
 struct SystemStatus {
     active_connections: usize,
     uptime: u64,
     memory_usage: f64,
+    cpu_usage: f32,
+    processes: Vec<ProcessInfo>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -372,6 +385,8 @@ fn StatusBar() -> impl IntoView {
         active_connections: 0,
         uptime: 0,
         memory_usage: 0.0,
+        cpu_usage: 0.0,
+        processes: Vec::new(),
     });
     let (show_settings, set_show_settings) = signal(false);
     let (config, set_config) = signal(LLMConfig {
@@ -605,11 +620,29 @@ fn StatusBar() -> impl IntoView {
         spawn_local(status_update);
     });
 
+    // Track connection status
+    let _ = Effect::new(move |_| {
+        // Register connection
+        spawn_local(async move {
+            let args = serde_wasm_bindgen::to_value(&()).unwrap_or(JsValue::NULL);
+            let _ = invoke_with_timeout::<()>("register_connection", args, 1000).await;
+        });
+
+        // Return cleanup function
+        Box::new(move || {
+            spawn_local(async move {
+                let args = serde_wasm_bindgen::to_value(&()).unwrap_or(JsValue::NULL);
+                let _ = invoke_with_timeout::<()>("unregister_connection", args, 1000).await;
+            });
+        }) as Box<dyn FnOnce()>
+    });
+
     view! {
         <div class="status-bar">
+            <span class="status-item">"CPU: " {move || format!("{:.1}%", status.get().cpu_usage)}</span>
+            <span class="status-item">"Memory: " {move || format!("{:.1}%", status.get().memory_usage)}</span>
             <span class="status-item">"Connections: " {move || status.get().active_connections}</span>
             <span class="status-item">"Uptime: " {move || status.get().uptime} "s"</span>
-            <span class="status-item">"Memory: " {move || format!("{:.1}%", status.get().memory_usage)}</span>
             <div class="status-item model-select-container">
                 <select
                     class="model-select status-select"
