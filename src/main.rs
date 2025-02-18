@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 mod app;
-pub use app::*;
+use crate::app::App;  // Use explicit path
 
 fn main() {
     console_error_panic_hook::set_once();

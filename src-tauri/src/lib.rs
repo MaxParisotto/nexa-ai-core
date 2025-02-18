@@ -10,6 +10,9 @@ use tauri_plugin_log::Target;
 use serde_json;
 use tokio::time::sleep;
 use sysinfo::System;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::{accept_async, tungstenite::Message};
+use futures_util::{StreamExt, SinkExt};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LogEntry {
@@ -583,6 +586,54 @@ async fn register_connection(system_state: State<'_, SystemState>) -> Result<(),
 #[tauri::command]
 async fn unregister_connection(system_state: State<'_, SystemState>) -> Result<(), String> {
     system_state.decrement_connections();
+    Ok(())
+}
+
+pub async fn start_websocket_server() -> Result<(), String> {
+    let port = 9001;
+    let addr = format!("127.0.0.1:{}", port);
+
+    let listener = TcpListener::bind(&addr)
+        .await
+        .map_err(|e| format!("Failed to bind to address: {}", e))?;
+
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(handle_connection(stream));
+        }
+    });
+
+    Ok(())
+}
+
+async fn handle_connection(stream: TcpStream) -> Result<(), String> {
+    let ws_stream = accept_async(stream)
+        .await
+        .map_err(|e| format!("Failed to accept WebSocket connection: {}", e))?;
+
+    println!("New WebSocket connection established");
+
+    let (mut tx, mut rx) = ws_stream.split();
+
+    while let Some(msg) = rx.next().await {
+        let msg = msg.map_err(|e| format!("Failed to receive message: {}", e))?;
+
+        match msg {
+            Message::Text(text) => {
+                println!("Received text: {}", text);
+                // Echo the message back to the client
+                tx.send(Message::Text(format!("Echo: {}", text).into()))
+                    .await
+                    .map_err(|e| format!("Failed to send message: {}", e))?;
+            }
+            Message::Close(_) => {
+                println!("WebSocket connection closed");
+                break;
+            }
+            _ => (),
+        }
+    }
+
     Ok(())
 }
 

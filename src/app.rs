@@ -1,14 +1,18 @@
 use leptos::task::spawn_local;
-use leptos::{ev::SubmitEvent, prelude::*};
+use leptos::prelude::*;
+use leptos::ev::SubmitEvent;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsValue;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use wasm_bindgen::prelude::*;
-use web_sys::console;
-use futures::future::join_all;
+use web_sys::{console, WebSocket, MessageEvent, ErrorEvent, CloseEvent};
 use futures::future::FutureExt;
 use gloo_timers::future::TimeoutFuture;
-use leptos::html::ElementChild;
-use leptos::attr::custom::CustomAttribute;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+
+pub mod rete_canvas;
+use crate::app::rete_canvas::ReteCanvas;
 
 macro_rules! log {
     ($($t:tt)*) => {
@@ -84,7 +88,6 @@ struct ServerConfig {
 }
 
 /// General configuration for the LLM application including the WebSocket URL.
-/// Other fields (servers, available models, selected model) are added later.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct LLMConfig {
     ws_url: String,
@@ -410,7 +413,7 @@ fn StatusBar() -> impl IntoView {
         available_models: vec![],
         selected_model: String::new(),
     });
-    let (loading_models, set_loading_models) = signal(false);
+    let (loading_models, _set_loading_models) = signal(false);
     let (server_statuses, set_server_statuses) = signal(std::collections::HashMap::new());
 
     let toggle_settings = move |_| set_show_settings.update(|s| *s = !*s);
@@ -438,85 +441,6 @@ fn StatusBar() -> impl IntoView {
         });
     };
 
-    let fetch_models = move || {
-        let set_loading_models = set_loading_models.clone();
-        let set_config = set_config.clone();
-        let config = config.clone();
-        
-        spawn_local(async move {
-            log!("Starting to fetch models from all configured servers");
-            set_loading_models.set(true);
-            let mut models = Vec::new();
-            let servers = config.get().servers.clone();
-
-            // Create a vector of futures for parallel execution
-            let futures: Vec<_> = servers.iter().map(|server| {
-                let server = server.clone();
-                async move {
-                    log!("Fetching models from {} at {}", server.provider, server.url);
-                    let base_url = server.url.trim_end_matches('/');
-                    let full_url = if server.provider == "LM Studio" {
-                        if base_url.ends_with("/v1") {
-                            format!("{}/models", base_url)
-                        } else {
-                            format!("{}/v1/models", base_url)
-                        }
-                    } else {
-                        format!("{}/api/tags", base_url)
-                    };
-                    
-                    let args = serde_wasm_bindgen::to_value(&json!({
-                        "url": full_url,
-                        "timeout": 5000
-                    })).map_err(|e| format!("Failed to serialize request: {}", e))?;
-                    
-                    let cmd = if server.provider == "LM Studio" { "fetch_models_lmstudio" } else { "fetch_models_ollama" };
-                    
-                    match invoke_with_timeout::<Result<Vec<String>, String>>(cmd, args, 10000).await {
-                        Ok(Ok(models_result)) => {
-                            log!("Successfully fetched {} models from {}", models_result.len(), server.provider);
-                            Ok(models_result.into_iter().map(|name| ModelConfig {
-                                name,
-                                provider: server.provider.clone(),
-                            }).collect::<Vec<_>>())
-                        }
-                        Ok(Err(err)) => {
-                            log!("Server error from {}: {}", server.provider, err);
-                            Err(format!("Server error: {}", err))
-                        }
-                        Err(err) => {
-                            log!("Request failed for {}: {}", server.provider, err);
-                            Err(format!("Request failed: {}", err))
-                        }
-                    }
-                }
-            }).collect();
-
-            // Execute all futures in parallel with a timeout
-            let results = join_all(futures).await;
-
-            // Process results and handle errors
-            let mut had_errors = false;
-            for result in results {
-                match result {
-                    Ok(server_models) => models.extend(server_models),
-                    Err(err) => {
-                        log!("Error fetching models: {}", err);
-                        had_errors = true;
-                    }
-                }
-            }
-
-            if models.is_empty() && had_errors {
-                log!("Failed to fetch any models and encountered errors");
-            } else {
-                log!("Finished fetching models. Total models found: {}", models.len());
-                set_config.update(|c| c.available_models = models);
-            }
-            set_loading_models.set(false);
-        });
-    };
-
     let save_settings = move |ev: SubmitEvent| {
         ev.prevent_default();
         spawn_local(async move {
@@ -531,6 +455,8 @@ fn StatusBar() -> impl IntoView {
     let check_connection = move |server: ServerConfig| {
         let id = server.id.clone();
         let set_server_statuses = set_server_statuses.clone();
+        let set_config = set_config.clone();
+        let provider = server.provider.clone();
         
         spawn_local(async move {
             log!("Starting connection check for {} at {}", server.provider, server.url);
@@ -565,9 +491,21 @@ fn StatusBar() -> impl IntoView {
             let cmd = if server.provider == "LM Studio" { "fetch_models_lmstudio" } else { "fetch_models_ollama" };
             
             match invoke_with_timeout::<Result<Vec<String>, String>>(cmd, args, 5000).await {
-                Ok(Ok(_)) => {
+                Ok(Ok(models)) => {
                     log!("Connection check successful for {} at {}", server.provider, server.url);
-                    set_server_statuses.update(|s| { s.insert(id, ConnectionStatus::Connected); });
+                    set_server_statuses.update(|s| { s.insert(id.clone(), ConnectionStatus::Connected); });
+                    
+                    // Update available models in the config
+                    set_config.update(|c| {
+                        // Remove existing models for this provider
+                        c.available_models.retain(|m| m.provider != provider);
+                        
+                        // Add new models
+                        c.available_models.extend(models.into_iter().map(|name| ModelConfig {
+                            name,
+                            provider: provider.clone(),
+                        }));
+                    });
                 }
                 Ok(Err(err)) => {
                     let error = format!("Server error: {}", err);
@@ -590,13 +528,9 @@ fn StatusBar() -> impl IntoView {
     // Initial model fetch when settings are opened
     let _ = Effect::new(move |_| {
         if show_settings.get() {
-            fetch_models();
+            add_server("LM Studio");
+            add_server("Ollama");
         }
-    });
-
-    // Initial model fetch when component is mounted
-    let _ = Effect::new(move |_| {
-        fetch_models();
     });
 
     // Update status every second
@@ -635,6 +569,44 @@ fn StatusBar() -> impl IntoView {
                 let _ = invoke_with_timeout::<()>("unregister_connection", args, 1000).await;
             });
         }) as Box<dyn FnOnce()>
+    });
+
+    // Initialize WebSocket connection
+    let _ = Effect::new(move |_| {
+        let ws_url = config.get().ws_url.clone();
+        spawn_local(async move {
+            match WebSocket::new(&ws_url) {
+                Ok(ws) => {
+                    let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
+                        if let Ok(text) = e.data().dyn_into::<js_sys::JsString>() {
+                            log!("Received message: {}", text);
+                        }
+                    }) as Box<dyn FnMut(MessageEvent)>);
+                    
+                    let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
+                        log!("WebSocket error: {:?}", e);
+                    }) as Box<dyn FnMut(ErrorEvent)>);
+                    
+                    let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
+                        log!("WebSocket closed: {:?}", e);
+                    }) as Box<dyn FnMut(CloseEvent)>);
+                    
+                    ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
+                    ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
+                    ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
+                    
+                    // Keep callbacks alive
+                    onmessage_callback.forget();
+                    onerror_callback.forget();
+                    onclose_callback.forget();
+                    
+                    log!("WebSocket connected to {}", ws_url);
+                }
+                Err(e) => {
+                    log!("Failed to connect to WebSocket: {:?}", e);
+                }
+            }
+        });
     });
 
     view! {
@@ -698,10 +670,19 @@ fn StatusBar() -> impl IntoView {
                 </button>
             </div>
         </div>
+
         {move || show_settings.get().then(|| view! {
-            <div class="modal">
-                <div class="modal-content">
-                    <h2>"LLM Settings"</h2>
+            <div class="modal settings-modal">
+                <div class="modal-content settings-content">
+                    <div class="settings-header">
+                        <h2>"LLM Settings"</h2>
+                        <button class="close-btn" on:click=move |_| set_show_settings.set(false)>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </div>
                     <form on:submit=save_settings>
                         <div class="form-group">
                             <label for="ws-url">"WebSocket URL:"</label>
@@ -712,165 +693,57 @@ fn StatusBar() -> impl IntoView {
                                 on:input=move |ev| set_config.update(|c| c.ws_url = event_target_value(&ev))
                             />
                         </div>
-                        <div class="servers-container">
-                            <div class="servers-header">
-                                <h3>"LLM Servers"</h3>
-                                <div class="server-actions">
-                                    <button
-                                        type="button"
-                                        class="add-server-btn"
-                                        on:click=move |_| add_server("LM Studio")
-                                    >
-                                        "Add LM Studio"
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="add-server-btn"
-                                        on:click=move |_| add_server("Ollama")
-                                    >
-                                        "Add Ollama"
-                                    </button>
-                                </div>
-                            </div>
-                            {move || {
-                                let servers = config.get().servers;
-                                servers.into_iter().map(|server| {
-                                    let _name = server.name.clone();
-                                    let id = server.id.clone();
-                                    let provider = server.provider.clone();
-                                    let selected_model = server.selected_model.clone();
-                                    let url = server.url.clone();
-                                    
-                                    let id_for_div = id.clone();
-                                    let id_for_url = id.clone();
-                                    let id_for_model = id.clone();
-                                    let id_for_model_input = id.clone();
-                                    let provider_for_header = provider.clone();
-                                    let provider_for_filter = provider.clone();
-                                    
+                        <div class="servers-section">
+                            <h3>"Servers"</h3>
+                            <div class="server-list">
+                                {move || config.get().servers.iter().map(|server| {
+                                    let server = server.clone();
+                                    let server_id = server.id.clone();
+                                    let server_id_for_remove = server_id.clone();
                                     view! {
-                                        <div class="server-section" data-id=id_for_div>
-                                            <div class="server-header">
-                                                <h3>{format!("{} Server", provider_for_header)}</h3>
-                                                <button
-                                                    type="button"
-                                                    class="remove-server-btn"
-                                                    on:click=move |_| remove_server(id.clone())
-                                                >
-                                                    "Remove"
-                                                </button>
-                                            </div>
+                                        <div class="server-item">
                                             <ServerUrlInput
-                                                id=id_for_url.clone()
-                                                url=url.clone()
-                                                provider=provider.clone()
-                                                name=provider_for_header.clone()
-                                                selected_model=selected_model.clone()
+                                                id=server_id
+                                                url=server.url
+                                                provider=server.provider
+                                                name=server.name
+                                                selected_model=server.selected_model
                                                 set_config=set_config
                                                 server_statuses=server_statuses
                                                 set_server_statuses=set_server_statuses
                                                 check_connection=Box::new(check_connection.clone())
                                             />
-                                            <div class="form-group">
-                                                <label for=format!("server-model-{}", id_for_model)>"Model:"</label>
-                                                <div class="select-wrapper">
-                                                    <select
-                                                        id=format!("server-model-{}", id_for_model_input)
-                                                        class="model-select"
-                                                        on:change=move |ev| {
-                                                            let id = id_for_model.clone();
-                                                            set_config.update(|c| {
-                                                                if let Some(s) = c.servers.iter_mut().find(|s| s.id == id) {
-                                                                    s.selected_model = event_target_value(&ev);
-                                                                }
-                                                            });
-                                                        }
-                                                    >
-                                                        <option value="" selected=selected_model.is_empty()>
-                                                            "Select a model..."
-                                                        </option>
-                                                        {move || {
-                                                            let models = config.get().available_models
-                                                                .iter()
-                                                                .filter(|m| m.provider == provider_for_filter)
-                                                                .cloned()
-                                                                .collect::<Vec<_>>();
-                                                            models.into_iter().map(|model| {
-                                                                let model_name = model.name;
-                                                                let model_name_for_value = model_name.clone();
-                                                                let model_name_for_selected = model_name.clone();
-                                                                let model_name_for_content = model_name.clone();
-                                                                let selected_model = selected_model.clone();
-                                                                view! {
-                                                                    <option
-                                                                        value=model_name_for_value
-                                                                        selected=selected_model == model_name_for_selected
-                                                                    >
-                                                                        {model_name_for_content}
-                                                                    </option>
-                                                                }
-                                                            }).collect_view()
-                                                        }}
-                                                    </select>
-                                                </div>
-                                            </div>
+                                            <button
+                                                type="button"
+                                                class="remove-server-btn"
+                                                on:click=move |_| remove_server(server_id_for_remove.clone())
+                                            >
+                                                "Remove"
+                                            </button>
                                         </div>
                                     }
-                                }).collect_view()
-                            }}
-                        </div>
-                        <div class="form-group">
-                            <label for="default-model">"Default Model:"</label>
-                            <div class="select-wrapper">
-                                <select
-                                    id="default-model"
-                                    class="model-select"
-                                    on:change=move |ev| set_config.update(|c| c.selected_model = event_target_value(&ev))
+                                }).collect_view()}
+                            </div>
+                            <div class="add-server-buttons">
+                                <button
+                                    type="button"
+                                    on:click=move |_| add_server("LM Studio")
                                 >
-                                    <option value="" selected=move || config.get().selected_model.is_empty()>
-                                        "Select default model..."
-                                    </option>
-                                    {move || {
-                                        let servers = config.get().servers;
-                                        servers.into_iter().map(|server| {
-                                            let server_name = server.name.clone();
-                                            let server_provider = server.provider.clone();
-                                            let models = config.get().available_models
-                                                .iter()
-                                                .filter(|m| m.provider == server_provider)
-                                                .cloned()
-                                                .collect::<Vec<_>>();
-                                            
-                                            view! {
-                                                <optgroup label=server_name>
-                                                    {models.into_iter().map(|model| {
-                                                        let model_name = model.name;
-                                                        let model_name_for_value = model_name.clone();
-                                                        let model_name_for_selected = model_name.clone();
-                                                        let model_name_for_content = model_name.clone();
-                                                        let selected_model = config.get().selected_model.clone();
-                                                        view! {
-                                                            <option
-                                                                value=model_name_for_value
-                                                                selected=selected_model == model_name_for_selected
-                                                            >
-                                                                {model_name_for_content}
-                                                            </option>
-                                                        }
-                                                    }).collect_view()}
-                                                </optgroup>
-                                            }
-                                        }).collect_view()
-                                    }}
-                                </select>
-                                {move || loading_models.get().then(|| view! {
-                                    <span class="loading-spinner"></span>
-                                })}
+                                    "Add LM Studio Server"
+                                </button>
+                                <button
+                                    type="button"
+                                    on:click=move |_| add_server("Ollama")
+                                >
+                                    "Add Ollama Server"
+                                </button>
                             </div>
                         </div>
-                        <div class="form-actions">
-                            <button type="button" on:click=toggle_settings>"Cancel"</button>
-                            <button type="submit">"Save Configuration"</button>
+                        <div class="settings-actions">
+                            <button type="submit">"Save Settings"</button>
+                            <button type="button" on:click=move |_| set_show_settings.set(false)>
+                                "Cancel"
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -881,53 +754,10 @@ fn StatusBar() -> impl IntoView {
 
 #[component]
 pub fn App() -> impl IntoView {
-    let (name, set_name) = signal(String::new());
-    let (greet_msg, set_greet_msg) = signal(String::new());
-
-    let update_name = move |ev| {
-        let v = event_target_value(&ev);
-        set_name.set(v);
-    };
-
-    let greet = move |ev: SubmitEvent| {
-        ev.prevent_default();
-        spawn_local(async move {
-            let name = name.get_untracked();
-            if name.is_empty() {
-                return;
-            }
-
-            let args = serde_wasm_bindgen::to_value(&GreetArgs { name: &name }).unwrap();
-            // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-            let new_msg = invoke("greet", args).await.as_string().unwrap();
-            set_greet_msg.set(new_msg);
-        });
-    };
-
     view! {
-        <main class="container">
-            <h1>"Welcome to Tauri + Leptos"</h1>
-
-            <div class="row">
-                <a href="https://tauri.app" target="_blank">
-                    <img src="public/tauri.svg" class="logo tauri" alt="Tauri logo"/>
-                </a>
-                <a href="https://docs.rs/leptos/" target="_blank">
-                    <img src="public/leptos.svg" class="logo leptos" alt="Leptos logo"/>
-                </a>
-            </div>
-            <p>"Click on the Tauri and Leptos logos to learn more."</p>
-
-            <form class="row" on:submit=greet>
-                <input
-                    id="greet-input"
-                    placeholder="Enter a name..."
-                    on:input=update_name
-                />
-                <button type="submit">"Greet"</button>
-            </form>
-            <p>{ move || greet_msg.get() }</p>
+        <div class="app-container">
+            <ReteCanvas/>
             <StatusBar/>
-        </main>
+        </div>
     }
 }
