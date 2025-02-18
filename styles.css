@@ -230,23 +230,77 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    background: transparent;
     z-index: 1001;
+    pointer-events: none;
 }
 
 .modal-content {
+    pointer-events: auto;
+    position: fixed;
     background: #ffffff;
     padding: 24px;
     border-radius: 12px;
     min-width: 400px;
-    max-width: 600px;
-    width: 90%;
-    max-height: 85vh;
-    overflow-y: auto;
+    min-height: 300px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.modal.logs-modal .modal-content,
+.modal.settings-modal .modal-content {
+    position: fixed;
+    resize: both;
+    overflow: auto;
+    min-width: 400px;
+    min-height: 300px;
+}
+
+.modal-header {
+    cursor: move;
+    padding: 12px;
+    background: #f8f8f8;
+    border-bottom: 1px solid #eee;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.2em;
+}
+
+.resize-handle {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    bottom: 0;
+    right: 0;
+    cursor: se-resize;
+}
+
+.resize-handle::before {
+    content: '';
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    width: 12px;
+    height: 12px;
+    border-right: 2px solid #666;
+    border-bottom: 2px solid #666;
+}
+
+@media (prefers-color-scheme: dark) {
+    .modal-header {
+        background: #1f1f1f;
+        border-bottom-color: #3f3f3f;
+    }
+
+    .resize-handle::before {
+        border-color: #999;
+    }
 }
 
 .modal-content h2 {

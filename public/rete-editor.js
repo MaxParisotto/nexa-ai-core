@@ -5,6 +5,8 @@ class ReteEditor {
         this.nextId = 1;
         this.connections = [];
         this.selectedNode = null;
+        this.modelsFetched = new Set(); // Track which servers have had their models fetched
+        this.modelCache = new Map(); // Cache for storing fetched models
         this.initializeEditor();
     }
 
@@ -49,6 +51,16 @@ class ReteEditor {
                         return;
                     }
 
+                    // If we have cached models, use them
+                    if (this.modelCache.has(serverUrl)) {
+                        console.log('Using cached models for', serverUrl);
+                        const cachedModels = this.modelCache.get(serverUrl);
+                        modelSelect.innerHTML = '<option value="">Select Model</option>' +
+                            cachedModels.map(model => `<option value="${model}">${model}</option>`).join('');
+                        modelSelect.disabled = false;
+                        return;
+                    }
+
                     try {
                         modelSelect.disabled = true;
                         loadingIndicator.style.display = 'block';
@@ -62,39 +74,32 @@ class ReteEditor {
                             timeout: 5000
                         });
 
-                        console.log('Server response:', result); // Debug log
+                        console.log('Server response:', result);
 
+                        let models = [];
                         if (result && Array.isArray(result)) {
-                            // Direct array response
-                            modelSelect.innerHTML = '<option value="">Select Model</option>' +
-                                result.map(model => `<option value="${model}">${model}</option>`).join('');
-                            modelSelect.disabled = false;
+                            models = result;
                         } else if (result && typeof result === 'object') {
-                            // Handle nested Result types
                             if (result.Ok) {
                                 const innerResult = result.Ok;
                                 if (Array.isArray(innerResult)) {
-                                    // Direct array in first Ok
-                                    modelSelect.innerHTML = '<option value="">Select Model</option>' +
-                                        innerResult.map(model => `<option value="${model}">${model}</option>`).join('');
-                                    modelSelect.disabled = false;
+                                    models = innerResult;
                                 } else if (innerResult && innerResult.Ok && Array.isArray(innerResult.Ok)) {
-                                    // Nested Ok with array
-                                    modelSelect.innerHTML = '<option value="">Select Model</option>' +
-                                        innerResult.Ok.map(model => `<option value="${model}">${model}</option>`).join('');
-                                    modelSelect.disabled = false;
-                                } else if (innerResult && innerResult.Err) {
-                                    // Inner error
-                                    modelSelect.innerHTML = `<option value="">Error: ${innerResult.Err}</option>`;
-                                    modelSelect.disabled = true;
+                                    models = innerResult.Ok;
                                 }
-                            } else if (result.Err) {
-                                // Outer error
-                                modelSelect.innerHTML = `<option value="">Error: ${result.Err}</option>`;
-                                modelSelect.disabled = true;
                             }
+                        }
+
+                        if (models.length > 0) {
+                            // Cache the models
+                            this.modelCache.set(serverUrl, models);
+                            
+                            // Update the select
+                            modelSelect.innerHTML = '<option value="">Select Model</option>' +
+                                models.map(model => `<option value="${model}">${model}</option>`).join('');
+                            modelSelect.disabled = false;
                         } else {
-                            throw new Error('Unexpected response format');
+                            throw new Error('No models found');
                         }
                     } catch (error) {
                         console.error('Error fetching models:', error);

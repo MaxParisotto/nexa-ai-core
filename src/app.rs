@@ -127,6 +127,12 @@ struct ChatCompletionRequest {
     message: String,
 }
 
+#[derive(Clone)]
+struct ModalPosition {
+    x: i32,
+    y: i32,
+}
+
 #[component]
 fn ServerUrlInput(
     id: String,
@@ -215,9 +221,36 @@ fn ServerUrlInput(
 fn LogViewer() -> impl IntoView {
     let (show_logs, set_show_logs) = signal(false);
     let (logs, set_logs) = signal(Vec::<LogEntry>::new());
-    let (filter_text, set_filter_text) = signal(String::new());
-    let (selected_level, set_selected_level) = signal(String::from("all"));
-    let (auto_scroll, set_auto_scroll) = signal(true);
+    let (filter_text, _set_filter_text) = signal(String::new());
+    let (selected_level, _set_selected_level) = signal(String::from("all"));
+    let (auto_scroll, _set_auto_scroll) = signal(true);
+    let (position, set_position) = signal(ModalPosition { x: 100, y: 100 });
+    let (is_dragging, set_is_dragging) = signal(false);
+    let (drag_start, set_drag_start) = signal(ModalPosition { x: 0, y: 0 });
+
+    let handle_mouse_down = move |ev: web_sys::MouseEvent| {
+        if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() {
+            set_is_dragging.set(true);
+            set_drag_start.set(ModalPosition {
+                x: ev.client_x() - position.get().x,
+                y: ev.client_y() - position.get().y,
+            });
+        }
+    };
+
+    let handle_mouse_move = move |ev: web_sys::MouseEvent| {
+        if is_dragging.get() {
+            let start = drag_start.get();
+            set_position.set(ModalPosition {
+                x: ev.client_x() - start.x,
+                y: ev.client_y() - start.y,
+            });
+        }
+    };
+
+    let handle_mouse_up = move |_| {
+        set_is_dragging.set(false);
+    };
 
     // Fetch logs periodically
     let _ = Effect::new(move |_| {
@@ -297,56 +330,36 @@ fn LogViewer() -> impl IntoView {
         </button>
 
         {move || show_logs.get().then(|| view! {
-            <div class="modal logs-modal">
+            <div 
+                class="modal logs-modal"
+                on:mousedown=handle_mouse_down
+                on:mousemove=handle_mouse_move
+                on:mouseup=handle_mouse_up
+                style:left=move || format!("{}px", position.get().x)
+                style:top=move || format!("{}px", position.get().y)
+            >
                 <div class="modal-content logs-content">
-                    <div class="logs-header">
+                    <div class="modal-header">
                         <h2>"System Logs"</h2>
-                        <div class="logs-controls">
-                            <div class="filter-group">
-                                <input
-                                    type="text"
-                                    placeholder="Filter logs..."
-                                    on:input=move |ev| set_filter_text.set(event_target_value(&ev))
-                                />
-                                <select
-                                    on:change=move |ev| set_selected_level.set(event_target_value(&ev))
-                                >
-                                    <option value="all" selected=true>"All Levels"</option>
-                                    <option value="error">"Error"</option>
-                                    <option value="warn">"Warning"</option>
-                                    <option value="info">"Info"</option>
-                                    <option value="debug">"Debug"</option>
-                                    <option value="trace">"Trace"</option>
-                                </select>
-                                <label class="auto-scroll-label">
-                                    <input
-                                        type="checkbox"
-                                        checked=move || auto_scroll.get()
-                                        on:change=move |ev| set_auto_scroll.set(event_target_checked(&ev))
-                                    />
-                                    "Auto-scroll"
-                                </label>
-                            </div>
-                            <div class="logs-actions">
-                                <button class="copy-btn" on:click=copy_logs title="Copy Logs">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                    </svg>
-                                </button>
-                                <button class="clear-btn" on:click=clear_logs title="Clear Logs">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M3 6h18"/>
-                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                    </svg>
-                                </button>
-                                <button class="close-btn" on:click=move |_| set_show_logs.set(false)>
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <line x1="18" y1="6" x2="6" y2="18"/>
-                                        <line x1="6" y1="6" x2="18" y2="18"/>
-                                    </svg>
-                                </button>
-                            </div>
+                        <div class="logs-actions">
+                            <button class="copy-btn" on:click=copy_logs title="Copy Logs">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                </svg>
+                            </button>
+                            <button class="clear-btn" on:click=clear_logs title="Clear Logs">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 6h18"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                            </button>
+                            <button class="close-btn" on:click=move |_| set_show_logs.set(false)>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                </svg>
+                            </button>
                         </div>
                     </div>
                     <div class="logs-container" id="logs-container">
@@ -376,6 +389,7 @@ fn LogViewer() -> impl IntoView {
                             }).collect_view()
                         }}
                     </div>
+                    <div class="resize-handle"></div>
                 </div>
             </div>
         })}
@@ -416,22 +430,53 @@ fn StatusBar() -> impl IntoView {
     let (loading_models, _set_loading_models) = signal(false);
     let (server_statuses, set_server_statuses) = signal(std::collections::HashMap::new());
 
+    let (settings_position, set_settings_position) = signal(ModalPosition { x: 200, y: 100 });
+    let (is_dragging, set_is_dragging) = signal(false);
+    let (drag_start, set_drag_start) = signal(ModalPosition { x: 0, y: 0 });
+
+    let handle_mouse_down = move |ev: web_sys::MouseEvent| {
+        if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() {
+            set_is_dragging.set(true);
+            set_drag_start.set(ModalPosition {
+                x: ev.client_x() - settings_position.get().x,
+                y: ev.client_y() - settings_position.get().y,
+            });
+        }
+    };
+
+    let handle_mouse_move = move |ev: web_sys::MouseEvent| {
+        if is_dragging.get() {
+            let start = drag_start.get();
+            set_settings_position.set(ModalPosition {
+                x: ev.client_x() - start.x,
+                y: ev.client_y() - start.y,
+            });
+        }
+    };
+
+    let handle_mouse_up = move |_| {
+        set_is_dragging.set(false);
+    };
+
     let toggle_settings = move |_| set_show_settings.update(|s| *s = !*s);
     
     let add_server = move |provider: &str| {
         set_config.update(|c| {
-            let id = format!("{}-{}", provider.to_lowercase().replace(" ", "-"), c.servers.len() + 1);
-            c.servers.push(ServerConfig {
-                id,
-                name: provider.to_string(),
-                url: match provider {
-                    "LM Studio" => "http://localhost:1234/v1".to_string(),
-                    "Ollama" => "http://localhost:11434".to_string(),
-                    _ => "http://localhost:8000".to_string(),
-                },
-                provider: provider.to_string(),
-                selected_model: String::new(),
-            });
+            // Only add if no server of this type exists
+            if !c.servers.iter().any(|s| s.provider == provider) {
+                let id = format!("{}-1", provider.to_lowercase().replace(" ", "-"));
+                c.servers.push(ServerConfig {
+                    id,
+                    name: provider.to_string(),
+                    url: match provider {
+                        "LM Studio" => "http://localhost:1234/v1".to_string(),
+                        "Ollama" => "http://localhost:11434".to_string(),
+                        _ => "http://localhost:8000".to_string(),
+                    },
+                    provider: provider.to_string(),
+                    selected_model: String::new(),
+                });
+            }
         });
     };
 
@@ -457,6 +502,12 @@ fn StatusBar() -> impl IntoView {
         let set_server_statuses = set_server_statuses.clone();
         let set_config = set_config.clone();
         let provider = server.provider.clone();
+        
+        // Check if already checking this server
+        let current_statuses = server_statuses.get();
+        if matches!(current_statuses.get(&id), Some(ConnectionStatus::Checking)) {
+            return;
+        }
         
         spawn_local(async move {
             log!("Starting connection check for {} at {}", server.provider, server.url);
@@ -525,11 +576,51 @@ fn StatusBar() -> impl IntoView {
         });
     };
 
-    // Initial model fetch when settings are opened
+    // Initialize servers and check connections at boot
+    let _ = Effect::new(move |_| {
+        // Initialize default servers if none exist
+        set_config.update(|c| {
+            if c.servers.is_empty() {
+                c.servers = vec![
+                    ServerConfig {
+                        id: "lmstudio-1".to_string(),
+                        name: "LM Studio".to_string(),
+                        url: "http://localhost:1234/v1".to_string(),
+                        provider: "LM Studio".to_string(),
+                        selected_model: String::new(),
+                    },
+                    ServerConfig {
+                        id: "ollama-1".to_string(),
+                        name: "Ollama".to_string(),
+                        url: "http://localhost:11434".to_string(),
+                        provider: "Ollama".to_string(),
+                        selected_model: String::new(),
+                    },
+                ];
+            }
+        });
+
+        // Check connections for all servers at boot
+        spawn_local(async move {
+            let config = config.get();
+            for server in config.servers.iter() {
+                let server_clone = server.clone();
+                // Only check if not already checking or connected
+                let current_status = server_statuses.get().get(&server.id).cloned();
+                if !matches!(current_status, Some(ConnectionStatus::Checking | ConnectionStatus::Connected)) {
+                    check_connection(server_clone);
+                    // Add delay between checks
+                    TimeoutFuture::new(500).await;
+                }
+            }
+        });
+    });
+
+    // Remove the old initialization from show_settings effect
     let _ = Effect::new(move |_| {
         if show_settings.get() {
-            add_server("LM Studio");
-            add_server("Ollama");
+            // No need to initialize servers here anymore
+            // They are initialized at boot
         }
     });
 
@@ -672,9 +763,16 @@ fn StatusBar() -> impl IntoView {
         </div>
 
         {move || show_settings.get().then(|| view! {
-            <div class="modal settings-modal">
+            <div 
+                class="modal settings-modal"
+                on:mousedown=handle_mouse_down
+                on:mousemove=handle_mouse_move
+                on:mouseup=handle_mouse_up
+                style:left=move || format!("{}px", settings_position.get().x)
+                style:top=move || format!("{}px", settings_position.get().y)
+            >
                 <div class="modal-content settings-content">
-                    <div class="settings-header">
+                    <div class="modal-header">
                         <h2>"LLM Settings"</h2>
                         <button class="close-btn" on:click=move |_| set_show_settings.set(false)>
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -746,6 +844,7 @@ fn StatusBar() -> impl IntoView {
                             </button>
                         </div>
                     </form>
+                    <div class="resize-handle"></div>
                 </div>
             </div>
         })}
