@@ -13,12 +13,146 @@ class ReteEditor {
         this.bufferLogs = new Map(); // Store buffer logs for each node
         
         this.initializeEditor();
-        this.createBufferLogPanel();
+        this.initializeModals();
     }
 
     initializeEditor() {
         this.container.style.position = 'relative';
         this.container.style.overflow = 'hidden';
+    }
+
+    initializeModals() {
+        this.createBufferLogPanel();
+        this.createLLMSettingsPanel();
+        this.createLogsPanel();
+    }
+
+    createModalBase(title, className, buttonConfig) {
+        const { icon, title: btnTitle } = buttonConfig;
+        
+        // Create the button in the status bar
+        const statusActions = document.querySelector('.status-actions');
+        if (!statusActions) return null;
+
+        const button = document.createElement('button');
+        button.className = `status-bar-btn ${className}-btn`;
+        button.title = btnTitle;
+        button.innerHTML = icon;
+
+        // Create the modal panel
+        const modal = document.createElement('div');
+        modal.className = `modal ${className}-modal`;
+        modal.style.display = 'none';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>${title}</h2>
+                    <div class="modal-actions">
+                        ${buttonConfig.extraButtons || ''}
+                        <button class="close-btn" title="Close">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-content-body ${className}-content">
+                </div>
+                <div class="resize-handle"></div>
+            </div>
+        `;
+
+        // Add event listeners
+        button.addEventListener('click', () => {
+            modal.style.display = modal.style.display === 'none' ? 'block' : 'none';
+            button.classList.toggle('active');
+        });
+
+        const closeBtn = modal.querySelector('.close-btn');
+        closeBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+            button.classList.remove('active');
+        });
+
+        // Make the panel draggable and resizable
+        this.makeModalDraggable(modal);
+        this.makeModalResizable(modal);
+
+        // Add the button and panel to the DOM
+        statusActions.appendChild(button);
+        document.body.appendChild(modal);
+
+        return { modal, button };
+    }
+
+    createBufferLogPanel() {
+        const { modal } = this.createModalBase('Buffer Logs', 'buffer-logs', {
+            icon: `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12V7H3v5"/>
+                    <path d="M3 17h18"/>
+                    <path d="M21 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            `,
+            title: 'Buffer Logs',
+            extraButtons: `
+                <button class="clear-btn" title="Clear Logs">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            `
+        });
+
+        const clearBtn = modal.querySelector('.clear-btn');
+        clearBtn.addEventListener('click', () => {
+            this.clearBufferLogs();
+        });
+
+        this.bufferLogPanel = modal;
+    }
+
+    createLLMSettingsPanel() {
+        const { modal } = this.createModalBase('LLM Settings', 'settings', {
+            icon: `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            `,
+            title: 'Settings'
+        });
+
+        this.settingsPanel = modal;
+    }
+
+    createLogsPanel() {
+        const { modal } = this.createModalBase('System Logs', 'logs', {
+            icon: `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            `,
+            title: 'Logs',
+            extraButtons: `
+                <button class="copy-btn" title="Copy Logs">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                </button>
+                <button class="clear-btn" title="Clear Logs">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            `
+        });
+
+        this.logsPanel = modal;
     }
 
     createNodeContent(type = 'llm') {
@@ -754,78 +888,67 @@ class ReteEditor {
         this.container.innerHTML = '';
     }
 
-    // Add this new method to create the buffer log panel
-    createBufferLogPanel() {
-        // Create the buffer log button in the status bar
-        const statusActions = document.querySelector('.status-actions');
-        if (!statusActions) return;
+    // Add this method to log buffer operations
+    logBufferOperation(nodeId, type, data) {
+        if (!this.bufferLogs.has(nodeId)) {
+            this.bufferLogs.set(nodeId, []);
+        }
 
-        const bufferLogBtn = document.createElement('button');
-        bufferLogBtn.className = 'buffer-logs-btn';
-        bufferLogBtn.title = 'Buffer Logs';
-        bufferLogBtn.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12V7H3v5"/>
-                <path d="M3 17h18"/>
-                <path d="M21 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-        `;
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            type,
+            data,
+        };
 
-        // Create the buffer log panel
-        const logPanel = document.createElement('div');
-        logPanel.className = 'modal buffer-logs-modal';
-        logPanel.style.display = 'none';
-        logPanel.innerHTML = `
-            <div class="modal-content buffer-logs-content">
-                <div class="modal-header">
-                    <h2>Buffer Logs</h2>
-                    <div class="logs-actions">
-                        <button class="clear-btn" title="Clear Logs">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M3 6h18"/>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            </svg>
-                        </button>
-                        <button class="close-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-                <div class="buffer-log-content">
-                    <div class="buffer-log-entries"></div>
-                </div>
-                <div class="resize-handle"></div>
+        this.bufferLogs.get(nodeId).push(logEntry);
+        this.updateBufferLogDisplay(nodeId, logEntry);
+    }
+
+    // Add this method to update the log display
+    updateBufferLogDisplay(nodeId, logEntry) {
+        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
+        const entry = document.createElement('div');
+        entry.className = `buffer-log-entry ${logEntry.type}`;
+        
+        const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
+        const nodeName = this.nodes.find(n => n.id === nodeId)?.querySelector('.node-header span')?.textContent || nodeId;
+
+        entry.innerHTML = `
+            <div class="timestamp">${timestamp}</div>
+            <div class="node-info">${nodeName}</div>
+            <div class="data-flow">
+                ${this.formatLogData(logEntry.type, logEntry.data)}
             </div>
         `;
 
-        // Add event listeners
-        bufferLogBtn.addEventListener('click', () => {
-            logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none';
-            bufferLogBtn.classList.toggle('active');
-        });
+        logEntries.appendChild(entry);
+        logEntries.scrollTop = logEntries.scrollHeight;
+    }
 
-        const closeBtn = logPanel.querySelector('.close-btn');
-        closeBtn.addEventListener('click', () => {
-            logPanel.style.display = 'none';
-            bufferLogBtn.classList.remove('active');
-        });
+    // Add this method to format log data
+    formatLogData(type, data) {
+        switch (type) {
+            case 'input':
+                return `📥 Input: ${this.truncateText(data.input)}`;
+            case 'output':
+                return `📤 Output: ${this.truncateText(data.output)}`;
+            case 'error':
+                return `❌ Error: ${data.message}`;
+            default:
+                return JSON.stringify(data);
+        }
+    }
 
-        const clearBtn = logPanel.querySelector('.clear-btn');
-        clearBtn.addEventListener('click', () => {
-            this.clearBufferLogs();
-        });
+    // Add this helper method
+    truncateText(text, length = 100) {
+        return text.length > length ? text.substring(0, length) + '...' : text;
+    }
 
-        // Make the panel draggable and resizable
-        this.makeModalDraggable(logPanel);
-        this.makeModalResizable(logPanel);
-
-        // Add the button and panel to the DOM
-        statusActions.appendChild(bufferLogBtn);
-        document.body.appendChild(logPanel);
-        this.bufferLogPanel = logPanel;
+    // Add this method to clear logs
+    clearBufferLogs() {
+        this.bufferLogs.clear();
+        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
+        logEntries.innerHTML = '';
     }
 
     // Add helper method for making modals draggable
@@ -892,69 +1015,6 @@ class ReteEditor {
         document.addEventListener('mouseup', () => {
             isResizing = false;
         });
-    }
-
-    // Add this method to log buffer operations
-    logBufferOperation(nodeId, type, data) {
-        if (!this.bufferLogs.has(nodeId)) {
-            this.bufferLogs.set(nodeId, []);
-        }
-
-        const logEntry = {
-            timestamp: new Date().toISOString(),
-            type,
-            data,
-        };
-
-        this.bufferLogs.get(nodeId).push(logEntry);
-        this.updateBufferLogDisplay(nodeId, logEntry);
-    }
-
-    // Add this method to update the log display
-    updateBufferLogDisplay(nodeId, logEntry) {
-        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
-        const entry = document.createElement('div');
-        entry.className = `buffer-log-entry ${logEntry.type}`;
-        
-        const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
-        const nodeName = this.nodes.find(n => n.id === nodeId)?.querySelector('.node-header span')?.textContent || nodeId;
-
-        entry.innerHTML = `
-            <div class="timestamp">${timestamp}</div>
-            <div class="node-info">${nodeName}</div>
-            <div class="data-flow">
-                ${this.formatLogData(logEntry.type, logEntry.data)}
-            </div>
-        `;
-
-        logEntries.appendChild(entry);
-        logEntries.scrollTop = logEntries.scrollHeight;
-    }
-
-    // Add this method to format log data
-    formatLogData(type, data) {
-        switch (type) {
-            case 'input':
-                return `📥 Input: ${this.truncateText(data.input)}`;
-            case 'output':
-                return `📤 Output: ${this.truncateText(data.output)}`;
-            case 'error':
-                return `❌ Error: ${data.message}`;
-            default:
-                return JSON.stringify(data);
-        }
-    }
-
-    // Add this helper method
-    truncateText(text, length = 100) {
-        return text.length > length ? text.substring(0, length) + '...' : text;
-    }
-
-    // Add this method to clear logs
-    clearBufferLogs() {
-        this.bufferLogs.clear();
-        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
-        logEntries.innerHTML = '';
     }
 }
 
