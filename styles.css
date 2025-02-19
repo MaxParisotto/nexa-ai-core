@@ -347,6 +347,8 @@ body {
     flex: 1;
     overflow-y: auto;
     padding: 16px;
+    background: #1f1f1f;
+    color: #ffffff;
 }
 
 .resize-handle {
@@ -390,6 +392,11 @@ body {
         background: #eee;
         color: #1f1f1f;
     }
+
+    .modal-content-body {
+        background: #ffffff;
+        color: #1f1f1f;
+    }
 }
 
 // Standardize status bar buttons
@@ -416,13 +423,14 @@ body {
     height: 20px;
 }
 
-// Apply standardized classes to specific panels
+// Apply standardized classes to all panel buttons
 .logs-btn,
 .settings-btn,
 .buffer-logs-btn {
     composes: status-bar-btn;
 }
 
+// Standardize modal dimensions
 .logs-modal .modal-content,
 .settings-modal .modal-content,
 .buffer-logs-modal .modal-content {

@@ -11,6 +11,7 @@ class ReteEditor {
         this.outputBuffers = new Map(); // Buffer for node outputs
         this.taskRoutes = new Map(); // Route configuration for tasks
         this.bufferLogs = new Map(); // Store buffer logs for each node
+        this.modals = new Map(); // Store all modal instances
         
         this.initializeEditor();
         this.initializeModals();
@@ -22,9 +23,129 @@ class ReteEditor {
     }
 
     initializeModals() {
-        this.createBufferLogPanel();
-        this.createLLMSettingsPanel();
-        this.createLogsPanel();
+        // Create all modals using the standardized system
+        this.createModal('Buffer Logs', 'buffer-logs', {
+            icon: this.getModalIcon('buffer'),
+            extraButtons: this.getModalExtraButtons('buffer')
+        });
+        
+        this.createModal('LLM Settings', 'settings', {
+            icon: this.getModalIcon('settings')
+        });
+        
+        this.createModal('System Logs', 'logs', {
+            icon: this.getModalIcon('logs'),
+            extraButtons: this.getModalExtraButtons('logs')
+        });
+    }
+
+    getModalIcon(type) {
+        const icons = {
+            buffer: `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12V7H3v5"/>
+                    <path d="M3 17h18"/>
+                    <path d="M21 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            `,
+            settings: `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            `,
+            logs: `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            `
+        };
+        return icons[type] || '';
+    }
+
+    getModalExtraButtons(type) {
+        const buttons = {
+            buffer: `
+                <button class="clear-btn" title="Clear Logs">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            `,
+            logs: `
+                <button class="copy-btn" title="Copy Logs">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                </button>
+                <button class="clear-btn" title="Clear Logs">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            `
+        };
+        return buttons[type] || '';
+    }
+
+    createModal(title, className, config) {
+        const modal = this.createModalBase(title, className, config);
+        if (modal) {
+            this.modals.set(className, modal);
+            
+            // Add specific event handlers based on modal type
+            switch (className) {
+                case 'buffer-logs':
+                    this.setupBufferLogsModal(modal);
+                    break;
+                case 'settings':
+                    this.setupSettingsModal(modal);
+                    break;
+                case 'logs':
+                    this.setupLogsModal(modal);
+                    break;
+            }
+        }
+        return modal;
+    }
+
+    setupBufferLogsModal(modal) {
+        const clearBtn = modal.querySelector('.clear-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => this.clearBufferLogs());
+        }
+    }
+
+    setupSettingsModal(modal) {
+        // Add settings-specific setup
+    }
+
+    setupLogsModal(modal) {
+        const copyBtn = modal.querySelector('.copy-btn');
+        const clearBtn = modal.querySelector('.clear-btn');
+        
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => this.copyLogs());
+        }
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => this.clearLogs());
+        }
+    }
+
+    // Helper methods for modal actions
+    copyLogs() {
+        const logContent = this.modals.get('logs')?.querySelector('.logs-content')?.textContent || '';
+        navigator.clipboard.writeText(logContent).catch(console.error);
+    }
+
+    clearLogs() {
+        const logsContent = this.modals.get('logs')?.querySelector('.logs-content');
+        if (logsContent) {
+            logsContent.innerHTML = '';
+        }
     }
 
     createModalBase(title, className, buttonConfig) {
@@ -84,75 +205,6 @@ class ReteEditor {
         document.body.appendChild(modal);
 
         return { modal, button };
-    }
-
-    createBufferLogPanel() {
-        const { modal } = this.createModalBase('Buffer Logs', 'buffer-logs', {
-            icon: `
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 12V7H3v5"/>
-                    <path d="M3 17h18"/>
-                    <path d="M21 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                </svg>
-            `,
-            title: 'Buffer Logs',
-            extraButtons: `
-                <button class="clear-btn" title="Clear Logs">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 6h18"/>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                </button>
-            `
-        });
-
-        const clearBtn = modal.querySelector('.clear-btn');
-        clearBtn.addEventListener('click', () => {
-            this.clearBufferLogs();
-        });
-
-        this.bufferLogPanel = modal;
-    }
-
-    createLLMSettingsPanel() {
-        const { modal } = this.createModalBase('LLM Settings', 'settings', {
-            icon: `
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                </svg>
-            `,
-            title: 'Settings'
-        });
-
-        this.settingsPanel = modal;
-    }
-
-    createLogsPanel() {
-        const { modal } = this.createModalBase('System Logs', 'logs', {
-            icon: `
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                </svg>
-            `,
-            title: 'Logs',
-            extraButtons: `
-                <button class="copy-btn" title="Copy Logs">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                    </svg>
-                </button>
-                <button class="clear-btn" title="Clear Logs">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 6h18"/>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                </button>
-            `
-        });
-
-        this.logsPanel = modal;
     }
 
     createNodeContent(type = 'llm') {
@@ -888,7 +940,7 @@ class ReteEditor {
         this.container.innerHTML = '';
     }
 
-    // Add this method to log buffer operations
+    // Update buffer log methods to use the new modal system
     logBufferOperation(nodeId, type, data) {
         if (!this.bufferLogs.has(nodeId)) {
             this.bufferLogs.set(nodeId, []);
@@ -904,9 +956,11 @@ class ReteEditor {
         this.updateBufferLogDisplay(nodeId, logEntry);
     }
 
-    // Add this method to update the log display
     updateBufferLogDisplay(nodeId, logEntry) {
-        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
+        const modal = this.modals.get('buffer-logs');
+        const logEntries = modal?.querySelector('.buffer-log-entries');
+        if (!logEntries) return;
+
         const entry = document.createElement('div');
         entry.className = `buffer-log-entry ${logEntry.type}`;
         
@@ -923,6 +977,34 @@ class ReteEditor {
 
         logEntries.appendChild(entry);
         logEntries.scrollTop = logEntries.scrollHeight;
+    }
+
+    clearBufferLogs() {
+        this.bufferLogs.clear();
+        const modal = this.modals.get('buffer-logs');
+        const logEntries = modal?.querySelector('.buffer-log-entries');
+        if (logEntries) {
+            logEntries.innerHTML = '';
+        }
+    }
+
+    // Add method to show/hide modals
+    toggleModal(type) {
+        const modal = this.modals.get(type);
+        if (modal) {
+            const isVisible = modal.style.display !== 'none';
+            modal.style.display = isVisible ? 'none' : 'block';
+            const button = document.querySelector(`.${type}-btn`);
+            if (button) {
+                button.classList.toggle('active', !isVisible);
+            }
+        }
+    }
+
+    // Add method to get modal state
+    isModalVisible(type) {
+        const modal = this.modals.get(type);
+        return modal?.style.display !== 'none';
     }
 
     // Add this method to format log data
@@ -942,13 +1024,6 @@ class ReteEditor {
     // Add this helper method
     truncateText(text, length = 100) {
         return text.length > length ? text.substring(0, length) + '...' : text;
-    }
-
-    // Add this method to clear logs
-    clearBufferLogs() {
-        this.bufferLogs.clear();
-        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
-        logEntries.innerHTML = '';
     }
 
     // Add helper method for making modals draggable
