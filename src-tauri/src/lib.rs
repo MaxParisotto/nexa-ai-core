@@ -453,7 +453,7 @@ async fn chat_completion(
     // Send the response through WebSocket for real-time updates
     if let Ok(response_text) = &response {
         if let Some(tx) = WS_SENDER.lock().await.as_ref() {
-            let update = json!({
+            let response_json = json!({
                 "type": "chat_response",
                 "data": {
                     "model": model,
@@ -463,63 +463,142 @@ async fn chat_completion(
                 }
             });
             
-            let _ = tx.send(Message::Text(update.to_string().into())).await;
+            if let Err(e) = tx.send(Message::Text(response_json.to_string().into())).await {
+                log::error!("Failed to send chat response: {}", e);
+            }
         }
     }
 
     response
 }
 
-// WebSocket handler for real-time updates
+// Improved WebSocket handler with proper error handling and state management
 pub async fn handle_ws_connection(ws: WebSocket) {
     let (mut tx, mut rx) = ws.split();
     let (sender, mut receiver) = mpsc::channel::<Message>(32);
     
-    // Store sender for broadcasting updates
-    *WS_SENDER.lock().await = Some(sender);
+    // Store sender for broadcasting updates with proper error handling
+    if let Some(ref mut ws_sender) = *WS_SENDER.lock().await {
+        *ws_sender = sender;
+    } else {
+        *WS_SENDER.lock().await = Some(sender);
+    }
 
-    // Forward received messages to all connected clients
+    // Forward received messages to all connected clients with proper error handling
     let forward_task = tokio::spawn(async move {
         while let Some(msg) = receiver.recv().await {
-            if let Err(e) = tx.send(msg).await {
-                log::error!("Failed to forward message: {}", e);
-                break;
+            match tx.send(msg).await {
+                Ok(_) => (),
+                Err(e) => {
+                    log::error!("Failed to forward message: {}", e);
+                    break;
+                }
             }
         }
     });
 
-    // Handle incoming messages
+    // Handle incoming messages with improved error handling
     let receive_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = rx.next().await {
-            match msg {
-                Message::Text(text) => {
-                    log::info!("Received message: {}", text);
-                    // Handle incoming message routing
-                    if let Ok(update) = serde_json::from_str::<Value>(&text) {
-                        if let Some(msg_type) = update.get("type").and_then(|t| t.as_str()) {
-                            match msg_type {
-                                "node_output" => {
-                                    // Handle node output routing
-                                    if let Some(tx) = WS_SENDER.lock().await.as_ref() {
-                                        let _ = tx.send(Message::Text(text.into())).await;
+        while let Some(result) = rx.next().await {
+            match result {
+                Ok(msg) => {
+                    match msg {
+                        Message::Text(text) => {
+                            log::info!("Received message: {}", text);
+                            
+                            match serde_json::from_str::<Value>(&text) {
+                                Ok(update) => {
+                                    if let Some(msg_type) = update.get("type").and_then(|t| t.as_str()) {
+                                        match msg_type {
+                                            "node_output" => {
+                                                if let Some(tx) = WS_SENDER.lock().await.as_ref() {
+                                                    if let Err(e) = tx.send(Message::Text(text.clone())).await {
+                                                        log::error!("Failed to broadcast node output: {}", e);
+                                                    }
+                                                }
+                                            }
+                                            "chat_request" => {
+                                                if let Some(data) = update.get("data") {
+                                                    if let Ok(request) = serde_json::from_value::<ChatRequest>(data.clone()) {
+                                                        // Process chat request
+                                                        match process_chat_request(request).await {
+                                                            Ok(response) => {
+                                                                if let Some(tx) = WS_SENDER.lock().await.as_ref() {
+                                                                    let response_json = json!({
+                                                                        "type": "chat_response",
+                                                                        "data": response
+                                                                    });
+                                                                    if let Err(e) = tx.send(Message::Text(response_json.to_string().into())).await {
+                                                                        log::error!("Failed to send chat response: {}", e);
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                log::error!("Failed to process chat request: {}", e);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            _ => log::warn!("Unknown message type: {}", msg_type),
+                                        }
                                     }
                                 }
-                                _ => log::warn!("Unknown message type: {}", msg_type),
+                                Err(e) => log::error!("Failed to parse message: {}", e),
                             }
                         }
+                        Message::Close(_) => break,
+                        _ => (),
                     }
                 }
-                Message::Close(_) => break,
-                _ => {}
+                Err(e) => {
+                    log::error!("WebSocket error: {}", e);
+                    break;
+                }
             }
         }
     });
 
-    // Wait for tasks to complete
+    // Wait for tasks to complete with proper cleanup
     tokio::select! {
-        _ = forward_task => {},
-        _ = receive_task => {},
+        _ = forward_task => {
+            log::info!("Forward task completed");
+        }
+        _ = receive_task => {
+            log::info!("Receive task completed");
+        }
     }
+
+    // Clean up WebSocket sender
+    if let Some(tx) = WS_SENDER.lock().await.take() {
+        drop(tx);
+    }
+}
+
+// Improved chat request processing
+async fn process_chat_request(request: ChatRequest) -> Result<Value, String> {
+    let response = match request.model.contains("ollama") {
+        true => ollama_chat(
+            "http://localhost:11434",  // Default Ollama server URL
+            &request.model,
+            &request.messages[0].content,
+            request.temperature.unwrap_or(0.7)
+        ).await?,
+        false => lmstudio_chat(
+            "http://localhost:1234/v1",  // Default LM Studio server URL
+            &request.model,
+            &request.messages[0].content,
+            request.temperature.unwrap_or(0.7)
+        ).await?,
+    };
+
+    Ok(json!({
+        "message": {
+            "role": "assistant",
+            "content": response
+        },
+        "timestamp": chrono::Local::now().to_rfc3339()
+    }))
 }
 
 #[tauri::command]
@@ -534,75 +613,17 @@ async fn unregister_connection(system_state: State<'_, SystemState>) -> Result<(
     Ok(())
 }
 
-pub async fn start_websocket_server() -> Result<(), String> {
-    let port = 9001;
-    let addr = format!("127.0.0.1:{}", port);
-
-    let listener = TcpListener::bind(&addr)
-        .await
-        .map_err(|e| format!("Failed to bind to address: {}", e))?;
-
-    log::info!("WebSocket server listening on {}", addr);
-
-    tokio::spawn(async move {
-        while let Ok((stream, addr)) = listener.accept().await {
-            log::info!("New WebSocket connection from: {}", addr);
-            
-            tokio::spawn(async move {
-                match handle_connection(stream).await {
-                    Ok(_) => log::info!("WebSocket connection closed gracefully: {}", addr),
-                    Err(e) => log::error!("WebSocket connection error: {}", e),
-                }
-            });
-        }
-    });
-
-    Ok(())
-}
-
-async fn handle_connection(stream: TcpStream) -> Result<(), String> {
-    let ws_stream = accept_async(stream)
-        .await
-        .map_err(|e| format!("Failed to accept WebSocket connection: {}", e))?;
-
-    let (mut tx, mut rx) = ws_stream.split();
-
-    // Handle incoming messages only
-    while let Some(msg) = rx.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                log::debug!("Received text message: {}", text);
-                // Echo back with a timestamp
-                let response = format!("Received at {}: {}", 
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    text
-                );
-                if let Err(e) = tx.send(Message::Text(response.into())).await {
-                    log::error!("Failed to send response: {}", e);
-                    break;
-                }
-            }
-            Ok(Message::Close(_)) => {
-                log::info!("Client initiated close");
-                break;
-            }
-            Ok(_) => {
-                // Ignore other message types
-                continue;
-            }
-            Err(e) => {
-                return Err(format!("WebSocket error: {}", e));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let log_state = LogState::new();
     let system_state = SystemState::new();
+
+    // Create a new tokio runtime for the WebSocket server
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        if let Err(e) = start_websocket_server().await {
+            log::error!("Failed to start WebSocket server: {}", e);
+        }
+    });
 
     tauri::Builder::default()
         .manage(Mutex::new(log_state))
@@ -641,7 +662,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let log_state = app.state::<Mutex<LogState>>();
-            let _system_state = app.state::<SystemState>();
             
             // Initialize with startup log entries
             if let Ok(mut state) = log_state.lock() {
@@ -652,7 +672,7 @@ pub fn run() {
                 );
                 let _ = state.add_entry(
                     "debug",
-                    "Registering Tauri commands: greet, get_logs, clear_logs, fetch_models_lmstudio, fetch_models_ollama, chat_completion, get_system_status",
+                    "WebSocket server started on ws://127.0.0.1:9001",
                     "system"
                 );
             }
@@ -671,5 +691,33 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+pub async fn start_websocket_server() -> Result<(), String> {
+    let port = 9001;
+    let addr = format!("127.0.0.1:{}", port);
+
+    let listener = TcpListener::bind(&addr)
+        .await
+        .map_err(|e| format!("Failed to bind to address: {}", e))?;
+
+    log::info!("WebSocket server listening on ws://{}", addr);
+
+    tokio::spawn(async move {
+        while let Ok((stream, addr)) = listener.accept().await {
+            log::info!("New WebSocket connection from: {}", addr);
+            
+            match accept_async(stream).await {
+                Ok(ws_stream) => {
+                    tokio::spawn(async move {
+                        handle_ws_connection(ws_stream).await;
+                    });
+                }
+                Err(e) => log::error!("Failed to accept WebSocket connection: {}", e),
+            }
+        }
+    });
+
+    Ok(())
 }
 

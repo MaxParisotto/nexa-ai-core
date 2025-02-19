@@ -84,7 +84,7 @@
     </style>
   </head>
   <body>
-    <script src="rete-editor.js"></script>
+    <div id="rete"></div>
     <div id="status-bar">
         <div class="status-left">
             <span class="status-item" id="connections">
@@ -170,6 +170,24 @@
         setInterval(updateStatus, 1000);
         // Initial update
         updateStatus();
+    </script>
+    <script>
+      // Initialize ReteEditor globally
+      window.addEventListener('load', () => {
+        console.log('Window loaded, checking ReteEditor...');
+        if (typeof ReteEditor === 'undefined') {
+          console.error('ReteEditor is not defined! Check if rete-editor.js was loaded correctly');
+        } else {
+          console.log('ReteEditor is loaded successfully');
+          const container = document.getElementById('rete');
+          if (container) {
+            window.reteEditor = new ReteEditor(container);
+            console.log('ReteEditor instance created successfully');
+          } else {
+            console.error('Rete container not found');
+          }
+        }
+      });
     </script>
   </body>
 </html>

@@ -100,7 +100,6 @@ struct LLMConfig {
 #[derive(Clone, Debug, PartialEq)]
 enum ConnectionStatus {
     Unknown,
-    Checking,
     Connected,
     Failed(String),
 }
@@ -147,7 +146,6 @@ fn ServerUrlInput(
 ) -> impl IntoView {
     let id_for_input = id.clone();
     let id_for_update = id.clone();
-    let id_for_checking = id.clone();
     let id_for_connected = id.clone();
     let id_for_failed = id.clone();
     let id_for_click = id.clone();
@@ -181,7 +179,6 @@ fn ServerUrlInput(
                 <button
                     type="button"
                     class="check-connection-btn"
-                    class:checking=move || server_statuses.get().get(&id_for_checking).map_or(false, |s| matches!(s, ConnectionStatus::Checking))
                     class:connected=move || server_statuses.get().get(&id_for_connected).map_or(false, |s| matches!(s, ConnectionStatus::Connected))
                     class:failed=move || server_statuses.get().get(&id_for_failed).map_or(false, |s| matches!(s, ConnectionStatus::Failed(_)))
                     on:click=move |_| {
@@ -197,7 +194,6 @@ fn ServerUrlInput(
                 >
                     {move || match server_statuses.get().get(&id_for_status).unwrap_or(&ConnectionStatus::Unknown) {
                         ConnectionStatus::Unknown => "Test Connection",
-                        ConnectionStatus::Checking => "Checking...",
                         ConnectionStatus::Connected => "Connected ✓",
                         ConnectionStatus::Failed(_) => "Connection Failed ✗",
                     }}
@@ -232,7 +228,9 @@ fn LogViewer() -> impl IntoView {
     let (resize_start, set_resize_start) = signal((0, 0));
 
     let handle_mouse_down = move |ev: web_sys::MouseEvent| {
-        if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() {
+        if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() 
+            && !ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-actions").is_ok()
+            && !ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest("button").is_ok() {
             set_is_dragging.set(true);
             set_drag_start.set(ModalPosition {
                 x: ev.client_x() - position.get().x,
@@ -280,11 +278,14 @@ fn LogViewer() -> impl IntoView {
         }
     };
 
-    // Fetch logs periodically
+    // Fetch logs periodically with proper cleanup
     let _ = Effect::new(move |_| {
-        if show_logs.get() {
+        let cleanup: Box<dyn FnOnce()> = if show_logs.get() {
+            let running = std::rc::Rc::new(std::cell::RefCell::new(true));
+            let running_clone = running.clone();
+            
             spawn_local(async move {
-                loop {
+                while *running.borrow() && show_logs.get_untracked() {
                     let args = serde_wasm_bindgen::to_value(&()).unwrap_or(JsValue::NULL);
                     match invoke_with_timeout::<Vec<LogEntry>>("get_logs", args, 5000).await {
                         Ok(new_logs) => {
@@ -293,16 +294,17 @@ fn LogViewer() -> impl IntoView {
                         Err(e) => log!("Failed to fetch logs: {}", e),
                     }
                     
-                    // Wait for 1 second before next fetch
                     TimeoutFuture::new(1000).await;
-                    
-                    // Check if we should continue polling
-                    if !show_logs.get_untracked() {
-                        break;
-                    }
                 }
             });
-        }
+
+            Box::new(move || {
+                *running_clone.borrow_mut() = false;
+            })
+        } else {
+            Box::new(|| {})
+        };
+        cleanup
     });
 
     let filtered_logs = move || {
@@ -373,20 +375,35 @@ fn LogViewer() -> impl IntoView {
                 >
                     <div class="modal-header">
                         <h2>"System Logs"</h2>
-                        <div class="logs-actions">
-                            <button class="copy-btn" on:click=copy_logs title="Copy Logs">
+                        <div class="modal-actions">
+                            <button 
+                                class="copy-btn" 
+                                on:click=copy_logs
+                                title="Copy Logs"
+                                on:mousedown=|ev| ev.stop_propagation()
+                            >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                                 </svg>
                             </button>
-                            <button class="clear-btn" on:click=clear_logs title="Clear Logs">
+                            <button 
+                                class="clear-btn" 
+                                on:click=clear_logs
+                                title="Clear Logs"
+                                on:mousedown=|ev| ev.stop_propagation()
+                            >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M3 6h18"/>
                                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                                 </svg>
                             </button>
-                            <button class="close-btn" on:click=move |_| set_show_logs.set(false)>
+                            <button 
+                                class="close-btn" 
+                                on:click=move |_| set_show_logs.set(false)
+                                title="Close"
+                                on:mousedown=|ev| ev.stop_propagation()
+                            >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <line x1="18" y1="6" x2="6" y2="18"/>
                                     <line x1="6" y1="6" x2="18" y2="18"/>
@@ -398,7 +415,6 @@ fn LogViewer() -> impl IntoView {
                         {move || {
                             let logs = filtered_logs();
                             if auto_scroll.get() {
-                                // Scroll to bottom after render
                                 request_animation_frame(move || {
                                     if let Some(container) = document().get_element_by_id("logs-container") {
                                         container.set_scroll_top(container.scroll_height());
@@ -470,7 +486,9 @@ fn StatusBar() -> impl IntoView {
     let (resize_start, set_resize_start) = signal((0, 0));
 
     let handle_mouse_down = move |ev: web_sys::MouseEvent| {
-        if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() {
+        if ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-header").is_ok() 
+            && !ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest(".modal-actions").is_ok()
+            && !ev.target().unwrap().dyn_ref::<web_sys::Element>().unwrap().closest("button").is_ok() {
             set_is_dragging.set(true);
             set_drag_start.set(ModalPosition {
                 x: ev.client_x() - settings_position.get().x,
@@ -544,82 +562,64 @@ fn StatusBar() -> impl IntoView {
         });
     };
 
-    let check_connection = move |server: ServerConfig| {
-        let id = server.id.clone();
-        let set_server_statuses = set_server_statuses.clone();
-        let set_config = set_config.clone();
-        let provider = server.provider.clone();
+    let handle_check_connection = move |server: ServerConfig| {
+        let (_loading, set_loading) = signal(false);
+        let (_error, set_error) = signal(None::<String>);
         
-        // Check if already checking this server
-        let current_statuses = server_statuses.get();
-        if matches!(current_statuses.get(&id), Some(ConnectionStatus::Checking)) {
-            return;
-        }
+        set_loading.set(true);
+        set_error.set(None);
         
         spawn_local(async move {
-            log!("Starting connection check for {} at {}", server.provider, server.url);
-            set_server_statuses.update(|s| { s.insert(id.clone(), ConnectionStatus::Checking); });
+            let args = serde_wasm_bindgen::to_value(&json!({
+                "url": server.url,
+                "timeout": 5000
+            })).unwrap();
             
-            let base_url = server.url.trim_end_matches('/');
-            let full_url = if server.provider == "LM Studio" {
-                if base_url.ends_with("/v1") {
-                    format!("{}/models", base_url)
-                } else {
-                    format!("{}/v1/models", base_url)
-                }
-            } else {
-                format!("{}/api/tags", base_url)
-            };
-            
-            let args = match serde_wasm_bindgen::to_value(&json!({
-                "url": full_url,
-                "timeout": 3000
-            })) {
-                Ok(args) => args,
-                Err(e) => {
-                    let error = format!("Failed to prepare request: {}", e);
-                    log!("Connection check error: {}", error);
-                    set_server_statuses.update(|s| { 
-                        s.insert(id, ConnectionStatus::Failed(error)); 
+            let command = match server.provider.as_str() {
+                "LM Studio" => "fetch_models_lmstudio",
+                "Ollama" => "fetch_models_ollama",
+                _ => {
+                    let err = "Unknown provider".to_string();
+                    set_error.set(Some(err.clone()));
+                    set_server_statuses.update(|s| {
+                        s.insert(server.id.clone(), ConnectionStatus::Failed(err));
                     });
+                    set_loading.set(false);
                     return;
                 }
             };
             
-            let cmd = if server.provider == "LM Studio" { "fetch_models_lmstudio" } else { "fetch_models_ollama" };
-            
-            match invoke_with_timeout::<Result<Vec<String>, String>>(cmd, args, 5000).await {
+            match invoke_with_timeout::<Result<Vec<String>, String>>(command, args, 5000).await {
                 Ok(Ok(models)) => {
-                    log!("Connection check successful for {} at {}", server.provider, server.url);
-                    set_server_statuses.update(|s| { s.insert(id.clone(), ConnectionStatus::Connected); });
-                    
-                    // Update available models in the config
-                    set_config.update(|c| {
-                        // Remove existing models for this provider
-                        c.available_models.retain(|m| m.provider != provider);
-                        
-                        // Add new models
-                        c.available_models.extend(models.into_iter().map(|name| ModelConfig {
-                            name,
-                            provider: provider.clone(),
-                        }));
+                    set_server_statuses.update(|s| {
+                        s.insert(server.id.clone(), ConnectionStatus::Connected);
+                    });
+                    // Update available models if needed
+                    if !models.is_empty() {
+                        set_config.update(|c| {
+                            if let Some(server_config) = c.servers.iter_mut().find(|s| s.id == server.id) {
+                                server_config.selected_model = models[0].clone();
+                            }
+                        });
+                    }
+                }
+                Ok(Err(e)) => {
+                    let err = e.clone();
+                    set_error.set(Some(err.clone()));
+                    set_server_statuses.update(|s| {
+                        s.insert(server.id.clone(), ConnectionStatus::Failed(err));
                     });
                 }
-                Ok(Err(err)) => {
-                    let error = format!("Server error: {}", err);
-                    log!("Connection check failed for {} at {}: {}", server.provider, server.url, error);
-                    set_server_statuses.update(|s| { 
-                        s.insert(id, ConnectionStatus::Failed(error)); 
-                    });
-                }
-                Err(err) => {
-                    let error = format!("Connection failed: {}", err);
-                    log!("Connection check error for {} at {}: {}", server.provider, server.url, error);
-                    set_server_statuses.update(|s| { 
-                        s.insert(id, ConnectionStatus::Failed(error)); 
+                Err(e) => {
+                    let err = e.clone();
+                    set_error.set(Some(err.clone()));
+                    set_server_statuses.update(|s| {
+                        s.insert(server.id.clone(), ConnectionStatus::Failed(err));
                     });
                 }
             }
+            
+            set_loading.set(false);
         });
     };
 
@@ -652,35 +652,24 @@ fn StatusBar() -> impl IntoView {
             let config = config.get();
             for server in config.servers.iter() {
                 let server_clone = server.clone();
-                // Only check if not already checking or connected
+                // Only check if not already connected
                 let current_status = server_statuses.get().get(&server.id).cloned();
-                if !matches!(current_status, Some(ConnectionStatus::Checking | ConnectionStatus::Connected)) {
-                    check_connection(server_clone);
-                    // Add delay between checks
-                    TimeoutFuture::new(500).await;
+                if !matches!(current_status, Some(ConnectionStatus::Connected)) {
+                    handle_check_connection(server_clone);
                 }
             }
         });
     });
 
-    // Remove the old initialization from show_settings effect
+    // Update status every second with proper cleanup
     let _ = Effect::new(move |_| {
-        if show_settings.get() {
-            // No need to initialize servers here anymore
-            // They are initialized at boot
-        }
-    });
-
-    // Update status every second
-    let _ = Effect::new(move |_| {
-        let status_update = async move {
-            let set_status = set_status.clone();
-            loop {
-                let args = serde_wasm_bindgen::to_value(&()).map_err(|e| format!("Failed to serialize: {}", e)).unwrap_or_else(|e| {
-                    log!("Error preparing status request: {}", e);
-                    JsValue::NULL
-                });
-
+        let running = std::rc::Rc::new(std::cell::RefCell::new(true));
+        let running_clone = running.clone();
+        
+        spawn_local(async move {
+            while *running.borrow() {
+                let args = serde_wasm_bindgen::to_value(&()).unwrap_or(JsValue::NULL);
+                
                 match invoke_with_timeout::<SystemStatus>("get_system_status", args, 5000).await {
                     Ok(status) => set_status.set(status),
                     Err(e) => log!("Failed to update status: {}", e),
@@ -688,8 +677,12 @@ fn StatusBar() -> impl IntoView {
 
                 TimeoutFuture::new(1000).await;
             }
-        };
-        spawn_local(status_update);
+        });
+
+        // Return cleanup function
+        Box::new(move || {
+            *running_clone.borrow_mut() = false;
+        }) as Box<dyn FnOnce()>
     });
 
     // Track connection status
@@ -709,103 +702,135 @@ fn StatusBar() -> impl IntoView {
         }) as Box<dyn FnOnce()>
     });
 
-    // Initialize WebSocket connection
+    // Initialize WebSocket connection with proper cleanup
     let _ = Effect::new(move |_| {
-        let ws_url = config.get().ws_url.clone();
-        spawn_local(async move {
-            match WebSocket::new(&ws_url) {
-                Ok(ws) => {
-                    let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
-                        if let Ok(text) = e.data().dyn_into::<js_sys::JsString>() {
-                            log!("Received message: {}", text);
+        let ws_url = format!("ws://127.0.0.1:9001");
+        let ws = match WebSocket::new(&ws_url) {
+            Ok(ws) => ws,
+            Err(e) => {
+                log!("WebSocket connection error: {:?}", e);
+                return Box::new(|| {}) as Box<dyn FnOnce()>;
+            }
+        };
+
+        // Set up message handler
+        let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
+            if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
+                let message = txt.as_string().unwrap_or_default();
+                log!("Received message: {}", message);
+                
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&message) {
+                    if let Some(msg_type) = json.get("type").and_then(|t| t.as_str()) {
+                        match msg_type {
+                            "chat_response" => {
+                                // Handle chat response
+                                if let Some(_data) = json.get("data") {
+                                    // Update UI with response
+                                }
+                            }
+                            "node_output" => {
+                                // Handle node output
+                                if let Some(_data) = json.get("data") {
+                                    // Update node state
+                                }
+                            }
+                            _ => log!("Unknown message type: {}", msg_type)
                         }
-                    }) as Box<dyn FnMut(MessageEvent)>);
-                    
-                    let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
-                        log!("WebSocket error: {:?}", e);
-                    }) as Box<dyn FnMut(ErrorEvent)>);
-                    
-                    let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
-                        log!("WebSocket closed: {:?}", e);
-                    }) as Box<dyn FnMut(CloseEvent)>);
-                    
-                    ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
-                    ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
-                    ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
-                    
-                    // Keep callbacks alive
-                    onmessage_callback.forget();
-                    onerror_callback.forget();
-                    onclose_callback.forget();
-                    
-                    log!("WebSocket connected to {}", ws_url);
-                }
-                Err(e) => {
-                    log!("Failed to connect to WebSocket: {:?}", e);
+                    }
                 }
             }
-        });
+        }) as Box<dyn FnMut(MessageEvent)>);
+        ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
+        onmessage_callback.forget();
+
+        // Set up error handler
+        let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
+            log!("WebSocket error: {:?}", e);
+        }) as Box<dyn FnMut(ErrorEvent)>);
+        ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
+        onerror_callback.forget();
+
+        // Set up close handler
+        let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
+            log!("WebSocket closed: {:?}", e);
+        }) as Box<dyn FnMut(CloseEvent)>);
+        ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
+        onclose_callback.forget();
+
+        // Return cleanup function
+        Box::new(move || {
+            ws.close().unwrap_or_default();
+        }) as Box<dyn FnOnce()>
     });
 
     view! {
         <div class="status-bar">
-            <span class="status-item">"CPU: " {move || format!("{:.1}%", status.get().cpu_usage)}</span>
-            <span class="status-item">"Memory: " {move || format!("{:.1}%", status.get().memory_usage)}</span>
-            <span class="status-item">"Connections: " {move || status.get().active_connections}</span>
-            <span class="status-item">"Uptime: " {move || status.get().uptime} "s"</span>
-            <div class="status-item model-select-container">
-                <select
-                    class="model-select status-select"
-                    on:change=move |ev| set_config.update(|c| c.selected_model = event_target_value(&ev))
-                >
-                    <option value="" selected=move || config.get().selected_model.is_empty()>
-                        "Select model..."
-                    </option>
-                    {move || {
-                        let servers = config.get().servers;
-                        servers.into_iter().map(|server| {
-                            let server_name = server.name.clone();
-                            let server_provider = server.provider.clone();
-                            let models = config.get().available_models
-                                .iter()
-                                .filter(|m| m.provider == server_provider)
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            
-                            view! {
-                                <optgroup label=server_name>
-                                    {models.into_iter().map(|model| {
-                                        let model_name = model.name;
-                                        let model_name_for_value = model_name.clone();
-                                        let model_name_for_selected = model_name.clone();
-                                        let model_name_for_content = model_name.clone();
-                                        let selected_model = config.get().selected_model.clone();
-                                        view! {
-                                            <option
-                                                value=model_name_for_value
-                                                selected=selected_model == model_name_for_selected
-                                            >
-                                                {model_name_for_content}
-                                            </option>
-                                        }
-                                    }).collect_view()}
-                                </optgroup>
-                            }
-                        }).collect_view()
-                    }}
-                </select>
-                {move || loading_models.get().then(|| view! {
-                    <span class="loading-spinner"></span>
-                })}
+            <div class="status-left">
+                <span class="status-item">"CPU: " {move || format!("{:.1}%", status.get().cpu_usage)}</span>
+                <span class="status-item">"Memory: " {move || format!("{:.1}%", status.get().memory_usage)}</span>
+                <span class="status-item">"Connections: " {move || status.get().active_connections}</span>
+                <span class="status-item">"Uptime: " {move || status.get().uptime} "s"</span>
             </div>
-            <div class="status-actions">
-                <LogViewer/>
-                <button class="settings-btn" on:click=toggle_settings title="LLM Settings">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                    </svg>
-                </button>
+            <div class="status-right">
+                <div class="status-item model-select-container">
+                    <select
+                        class="model-select status-select"
+                        on:change=move |ev| set_config.update(|c| c.selected_model = event_target_value(&ev))
+                    >
+                        <option value="" selected=move || config.get().selected_model.is_empty()>
+                            "Select model..."
+                        </option>
+                        {move || {
+                            let servers = config.get().servers;
+                            servers.into_iter().map(|server| {
+                                let server_name = server.name.clone();
+                                let server_provider = server.provider.clone();
+                                let models = config.get().available_models
+                                    .iter()
+                                    .filter(|m| m.provider == server_provider)
+                                    .cloned()
+                                    .collect::<Vec<_>>();
+                                
+                                view! {
+                                    <optgroup label=server_name>
+                                        {models.into_iter().map(|model| {
+                                            let model_name = model.name;
+                                            let model_name_for_value = model_name.clone();
+                                            let model_name_for_selected = model_name.clone();
+                                            let model_name_for_content = model_name.clone();
+                                            let selected_model = config.get().selected_model.clone();
+                                            view! {
+                                                <option
+                                                    value=model_name_for_value
+                                                    selected=selected_model == model_name_for_selected
+                                                >
+                                                    {model_name_for_content}
+                                                </option>
+                                            }
+                                        }).collect_view()}
+                                    </optgroup>
+                                }
+                            }).collect_view()
+                        }}
+                    </select>
+                    {move || loading_models.get().then(|| view! {
+                        <span class="loading-spinner"></span>
+                    })}
+                </div>
+                <div class="status-actions">
+                    <LogViewer/>
+                    <button 
+                        class="settings-btn"
+                        class:active=move || show_settings.get()
+                        on:click=toggle_settings 
+                        title="LLM Settings"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -859,7 +884,7 @@ fn StatusBar() -> impl IntoView {
                                                 set_config=set_config
                                                 server_statuses=server_statuses
                                                 set_server_statuses=set_server_statuses
-                                                check_connection=Box::new(check_connection.clone())
+                                                check_connection=Box::new(handle_check_connection.clone())
                                             />
                                             <button
                                                 type="button"

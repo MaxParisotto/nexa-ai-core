@@ -13,6 +13,18 @@ class ReteEditor {
         this.bufferLogs = new Map(); // Store buffer logs for each node
         this.modals = new Map(); // Store all modal instances
         
+        // Add cleanup tracking
+        this.eventListeners = new Map();
+        this.rafCallbacks = new Set();
+        
+        // Bind methods
+        this.handleGlobalMouseMove = this.handleGlobalMouseMove.bind(this);
+        this.handleGlobalMouseUp = this.handleGlobalMouseUp.bind(this);
+        
+        // Add global listeners with passive option
+        document.addEventListener('mousemove', this.handleGlobalMouseMove, { passive: true });
+        document.addEventListener('mouseup', this.handleGlobalMouseUp, { passive: true });
+        
         this.initializeEditor();
         this.initializeModals();
     }
@@ -26,15 +38,18 @@ class ReteEditor {
         // Create all modals using the standardized system
         this.createModal('Buffer Logs', 'buffer-logs', {
             icon: this.getModalIcon('buffer'),
+            title: 'Buffer Logs',
             extraButtons: this.getModalExtraButtons('buffer')
         });
         
         this.createModal('LLM Settings', 'settings', {
-            icon: this.getModalIcon('settings')
+            icon: this.getModalIcon('settings'),
+            title: 'LLM Settings'
         });
         
         this.createModal('System Logs', 'logs', {
             icon: this.getModalIcon('logs'),
+            title: 'System Logs',
             extraButtons: this.getModalExtraButtons('logs')
         });
     }
@@ -113,36 +128,77 @@ class ReteEditor {
     }
 
     setupBufferLogsModal(modal) {
-        const clearBtn = modal.querySelector('.clear-btn');
+        const clearBtn = modal.modal.querySelector('.clear-btn');
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => this.clearBufferLogs());
+            clearBtn.addEventListener('click', () => {
+                this.clearBufferLogs();
+            });
+        }
+
+        // Add container for log entries if it doesn't exist
+        const content = modal.modal.querySelector('.modal-content-body');
+        if (content && !content.querySelector('.buffer-log-entries')) {
+            const entriesContainer = document.createElement('div');
+            entriesContainer.className = 'buffer-log-entries';
+            content.appendChild(entriesContainer);
         }
     }
 
     setupSettingsModal(modal) {
-        // Add settings-specific setup
+        const content = modal.modal.querySelector('.modal-content-body');
+        if (content) {
+            content.innerHTML = `
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3>Server Configuration</h3>
+                        <div class="settings-form">
+                            <!-- Settings content will be populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
     }
 
     setupLogsModal(modal) {
-        const copyBtn = modal.querySelector('.copy-btn');
-        const clearBtn = modal.querySelector('.clear-btn');
+        const content = modal.modal.querySelector('.modal-content-body');
+        if (content) {
+            content.innerHTML = `
+                <div class="logs-container">
+                    <div class="logs-entries"></div>
+                </div>
+            `;
+        }
+
+        const copyBtn = modal.modal.querySelector('.copy-btn');
+        const clearBtn = modal.modal.querySelector('.clear-btn');
         
         if (copyBtn) {
-            copyBtn.addEventListener('click', () => this.copyLogs());
+            copyBtn.addEventListener('click', () => {
+                this.copyLogs();
+            });
         }
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => this.clearLogs());
+            clearBtn.addEventListener('click', () => {
+                this.clearLogs();
+            });
         }
     }
 
     // Helper methods for modal actions
     copyLogs() {
-        const logContent = this.modals.get('logs')?.querySelector('.logs-content')?.textContent || '';
+        const modal = this.modals.get('logs');
+        if (!modal) return;
+        
+        const logContent = modal.modal.querySelector('.logs-entries')?.textContent || '';
         navigator.clipboard.writeText(logContent).catch(console.error);
     }
 
     clearLogs() {
-        const logsContent = this.modals.get('logs')?.querySelector('.logs-content');
+        const modal = this.modals.get('logs');
+        if (!modal) return;
+        
+        const logsContent = modal.modal.querySelector('.logs-entries');
         if (logsContent) {
             logsContent.innerHTML = '';
         }
@@ -157,7 +213,7 @@ class ReteEditor {
 
         const button = document.createElement('button');
         button.className = `status-bar-btn ${className}-btn`;
-        button.title = btnTitle;
+        button.title = btnTitle || title;
         button.innerHTML = icon;
 
         // Create the modal panel
@@ -178,21 +234,30 @@ class ReteEditor {
                         </button>
                     </div>
                 </div>
-                <div class="modal-content-body ${className}-content">
-                </div>
+                <div class="modal-content-body ${className}-content"></div>
                 <div class="resize-handle"></div>
             </div>
         `;
 
         // Add event listeners
         button.addEventListener('click', () => {
-            modal.style.display = modal.style.display === 'none' ? 'block' : 'none';
-            button.classList.toggle('active');
+            const isVisible = modal.style.display !== 'none';
+            this.hideAllModals();
+            if (!isVisible) {
+                modal.style.display = 'block';
+                modal.classList.add('visible');
+                button.classList.add('active');
+                // Position the modal relative to the button
+                const buttonRect = button.getBoundingClientRect();
+                modal.style.left = `${buttonRect.left}px`;
+                modal.style.top = `${buttonRect.bottom + 10}px`;
+            }
         });
 
         const closeBtn = modal.querySelector('.close-btn');
         closeBtn.addEventListener('click', () => {
             modal.style.display = 'none';
+            modal.classList.remove('visible');
             button.classList.remove('active');
         });
 
@@ -205,6 +270,14 @@ class ReteEditor {
         document.body.appendChild(modal);
 
         return { modal, button };
+    }
+
+    hideAllModals() {
+        this.modals.forEach((modalObj, className) => {
+            modalObj.modal.style.display = 'none';
+            modalObj.modal.classList.remove('visible');
+            modalObj.button.classList.remove('active');
+        });
     }
 
     createNodeContent(type = 'llm') {
@@ -798,70 +871,101 @@ class ReteEditor {
     }
 
     makeDraggable(node) {
-        let isDragging = false;
-        let currentX;
-        let currentY;
-        let initialX;
-        let initialY;
-        let rafId = null;
-
         node.addEventListener('mousedown', (e) => {
             if (e.target.closest('.node-controls, .node-select, .node-input, .tools-list, .params-container')) {
                 return;
             }
-            isDragging = true;
+            
+            this.activeOperation = {
+                type: 'dragging',
+                data: {
+                    node,
+                    initialX: e.clientX - node.offsetLeft,
+                    initialY: e.clientY - node.offsetTop
+                }
+            };
+            
             node.classList.add('dragging');
-            
-            initialX = e.clientX - node.offsetLeft;
-            initialY = e.clientY - node.offsetTop;
-            
-            // Force hardware acceleration
             node.style.willChange = 'transform';
         });
+    }
 
-        document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            e.preventDefault();
-            
-            // Cancel any existing animation frame
-            if (rafId) {
-                cancelAnimationFrame(rafId);
+    handleGlobalMouseMove(e) {
+        // Handle all mousemove events through a single listener
+        if (this.activeOperation) {
+            const { type, data } = this.activeOperation;
+            switch (type) {
+                case 'dragging':
+                    this.handleDrag(e, data);
+                    break;
+                case 'resizing':
+                    this.handleResize(e, data);
+                    break;
+                case 'modalDragging':
+                    this.handleModalDrag(e, data);
+                    break;
+                case 'modalResizing':
+                    this.handleModalResize(e, data);
+                    break;
             }
-
-            // Schedule the update
-            rafId = requestAnimationFrame(() => {
-                currentX = e.clientX - initialX;
-                currentY = e.clientY - initialY;
-
-                // Boundary checks
-                currentX = Math.max(0, Math.min(currentX, this.container.clientWidth - node.offsetWidth));
-                currentY = Math.max(0, Math.min(currentY, this.container.clientHeight - node.offsetHeight));
-
-                // Use transform instead of left/top for better performance
-                node.style.transform = `translate(${currentX}px, ${currentY}px)`;
-                
-                rafId = null;
-            });
-        }, { passive: true });
-
-        document.addEventListener('mouseup', () => {
-            if (!isDragging) return;
-            
-            isDragging = false;
-            node.classList.remove('dragging');
-            node.style.willChange = 'auto';
-            
-            // Convert transform to left/top for final position
-            const transform = new WebKitCSSMatrix(window.getComputedStyle(node).transform);
-            node.style.transform = 'none';
-            node.style.left = `${transform.m41}px`;
-            node.style.top = `${transform.m42}px`;
-            
-            if (rafId) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
+        }
+    }
+    
+    handleGlobalMouseUp() {
+        if (this.activeOperation) {
+            const { type, data } = this.activeOperation;
+            switch (type) {
+                case 'dragging':
+                    this.finalizeDrag(data);
+                    break;
+                case 'resizing':
+                    this.finalizeResize(data);
+                    break;
+                case 'modalDragging':
+                case 'modalResizing':
+                    this.finalizeModalOperation(data);
+                    break;
             }
+            this.activeOperation = null;
+        }
+    }
+    
+    handleDrag(e, data) {
+        const { node, initialX, initialY } = data;
+        
+        if (this.dragRaf) {
+            cancelAnimationFrame(this.dragRaf);
+        }
+        
+        this.dragRaf = requestAnimationFrame(() => {
+            const currentX = e.clientX - initialX;
+            const currentY = e.clientY - initialY;
+            
+            // Boundary checks
+            const boundedX = Math.max(0, Math.min(currentX, this.container.clientWidth - node.offsetWidth));
+            const boundedY = Math.max(0, Math.min(currentY, this.container.clientHeight - node.offsetHeight));
+            
+            node.style.transform = `translate(${boundedX}px, ${boundedY}px)`;
+            this.dragRaf = null;
         });
+    }
+    
+    finalizeDrag(data) {
+        const { node } = data;
+        
+        if (this.dragRaf) {
+            cancelAnimationFrame(this.dragRaf);
+            this.dragRaf = null;
+        }
+        
+        node.classList.remove('dragging');
+        node.style.willChange = 'auto';
+        
+        // Convert transform to left/top
+        const transform = new WebKitCSSMatrix(window.getComputedStyle(node).transform);
+        node.style.transform = 'none';
+        node.style.left = `${transform.m41}px`;
+        node.style.top = `${transform.m42}px`;
     }
 
     makeResizable(node, handle) {
@@ -936,6 +1040,15 @@ class ReteEditor {
     }
 
     destroy() {
+        // Clean up all event listeners
+        document.removeEventListener('mousemove', this.handleGlobalMouseMove);
+        document.removeEventListener('mouseup', this.handleGlobalMouseUp);
+        
+        // Cancel any pending animation frames
+        if (this.dragRaf) cancelAnimationFrame(this.dragRaf);
+        if (this.modalDragRaf) cancelAnimationFrame(this.modalDragRaf);
+        
+        // Clear all nodes and connections
         this.clear();
         this.container.innerHTML = '';
     }
@@ -958,7 +1071,7 @@ class ReteEditor {
 
     updateBufferLogDisplay(nodeId, logEntry) {
         const modal = this.modals.get('buffer-logs');
-        const logEntries = modal?.querySelector('.buffer-log-entries');
+        const logEntries = modal?.modal.querySelector('.buffer-log-entries');
         if (!logEntries) return;
 
         const entry = document.createElement('div');
@@ -982,7 +1095,7 @@ class ReteEditor {
     clearBufferLogs() {
         this.bufferLogs.clear();
         const modal = this.modals.get('buffer-logs');
-        const logEntries = modal?.querySelector('.buffer-log-entries');
+        const logEntries = modal?.modal.querySelector('.buffer-log-entries');
         if (logEntries) {
             logEntries.innerHTML = '';
         }
@@ -991,20 +1104,17 @@ class ReteEditor {
     // Add method to show/hide modals
     toggleModal(type) {
         const modal = this.modals.get(type);
-        if (modal) {
-            const isVisible = modal.style.display !== 'none';
-            modal.style.display = isVisible ? 'none' : 'block';
-            const button = document.querySelector(`.${type}-btn`);
-            if (button) {
-                button.classList.toggle('active', !isVisible);
-            }
-        }
+        if (!modal) return;
+        
+        const isVisible = modal.modal.style.display !== 'none';
+        modal.modal.style.display = isVisible ? 'none' : 'block';
+        modal.button.classList.toggle('active', !isVisible);
     }
 
     // Add method to get modal state
     isModalVisible(type) {
         const modal = this.modals.get(type);
-        return modal?.style.display !== 'none';
+        return modal ? modal.modal.style.display !== 'none' : false;
     }
 
     // Add this method to format log data
@@ -1028,68 +1138,100 @@ class ReteEditor {
 
     // Add helper method for making modals draggable
     makeModalDraggable(modal) {
-        const header = modal.querySelector('.modal-header');
-        let isDragging = false;
-        let currentX;
-        let currentY;
-        let initialX;
-        let initialY;
-
+        const header = modal.modal.querySelector('.modal-header');
+        
         header.addEventListener('mousedown', (e) => {
             if (e.target.closest('.logs-actions')) return;
-            isDragging = true;
-            initialX = e.clientX - modal.offsetLeft;
-            initialY = e.clientY - modal.offsetTop;
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            e.preventDefault();
             
-            currentX = e.clientX - initialX;
-            currentY = e.clientY - initialY;
-            
-            modal.style.left = `${currentX}px`;
-            modal.style.top = `${currentY}px`;
+            this.activeOperation = {
+                type: 'modalDragging',
+                data: {
+                    modal,
+                    initialX: e.clientX - modal.offsetLeft,
+                    initialY: e.clientY - modal.offsetTop
+                }
+            };
         });
+    }
 
-        document.addEventListener('mouseup', () => {
-            isDragging = false;
+    handleModalDrag(e, data) {
+        const { modal, initialX, initialY } = data;
+        
+        if (this.modalDragRaf) {
+            cancelAnimationFrame(this.modalDragRaf);
+        }
+        
+        this.modalDragRaf = requestAnimationFrame(() => {
+            modal.style.left = `${e.clientX - initialX}px`;
+            modal.style.top = `${e.clientY - initialY}px`;
+            this.modalDragRaf = null;
         });
+    }
+
+    finalizeModalOperation(data) {
+        if (this.modalDragRaf) {
+            cancelAnimationFrame(this.modalDragRaf);
+            this.modalDragRaf = null;
+        }
     }
 
     // Add helper method for making modals resizable
     makeModalResizable(modal) {
-        const handle = modal.querySelector('.resize-handle');
-        const content = modal.querySelector('.modal-content');
-        let isResizing = false;
-        let startWidth;
-        let startHeight;
-        let startX;
-        let startY;
-
+        const handle = modal.modal.querySelector('.resize-handle');
+        const content = modal.modal.querySelector('.modal-content');
+        
         handle.addEventListener('mousedown', (e) => {
-            isResizing = true;
-            startWidth = content.offsetWidth;
-            startHeight = content.offsetHeight;
-            startX = e.clientX;
-            startY = e.clientY;
-            e.preventDefault();
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
+            if (e.button !== 0) return;
             
+            this.activeOperation = {
+                type: 'modalResizing',
+                data: {
+                    modal,
+                    content,
+                    startWidth: content.offsetWidth,
+                    startHeight: content.offsetHeight,
+                    startX: e.clientX,
+                    startY: e.clientY
+                }
+            };
+            
+            handle.classList.add('resizing');
+            e.preventDefault();
+            e.stopPropagation();
+        });
+    }
+    
+    handleModalResize(e, data) {
+        const { content, startWidth, startHeight, startX, startY } = data;
+        
+        if (this.modalResizeRaf) {
+            cancelAnimationFrame(this.modalResizeRaf);
+        }
+        
+        this.modalResizeRaf = requestAnimationFrame(() => {
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
             
-            content.style.width = `${Math.max(400, startWidth + dx)}px`;
-            content.style.height = `${Math.max(300, startHeight + dy)}px`;
+            const newWidth = Math.max(400, startWidth + dx);
+            const newHeight = Math.max(300, startHeight + dy);
+            
+            content.style.width = `${newWidth}px`;
+            content.style.height = `${newHeight}px`;
+            
+            this.modalResizeRaf = null;
         });
-
-        document.addEventListener('mouseup', () => {
-            isResizing = false;
-        });
+    }
+    
+    finalizeModalResize(data) {
+        const { modal } = data;
+        const handle = modal.modal.querySelector('.resize-handle');
+        
+        if (this.modalResizeRaf) {
+            cancelAnimationFrame(this.modalResizeRaf);
+            this.modalResizeRaf = null;
+        }
+        
+        handle.classList.remove('resizing');
     }
 }
 
