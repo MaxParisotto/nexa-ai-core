@@ -426,7 +426,9 @@ body {
 // Apply standardized classes to all panel buttons
 .logs-btn,
 .settings-btn,
-.buffer-logs-btn {
+.buffer-logs-btn,
+.llm-servers-btn,
+.add-node-btn {
     composes: status-bar-btn;
 }
 
@@ -1395,5 +1397,286 @@ body {
 
     .buffer-log-entry .data-flow {
         border-left-color: #ddd;
+    }
+}
+
+// LLM Servers button specific styles
+.llm-servers-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #646cff;
+    transition: all 0.2s;
+}
+
+.llm-servers-btn:hover,
+.llm-servers-btn.active {
+    background: rgba(100, 108, 255, 0.1);
+}
+
+.llm-servers-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+// Add Node button specific styles
+.add-node-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #646cff;
+    transition: all 0.2s;
+}
+
+.add-node-btn:hover,
+.add-node-btn.active {
+    background: rgba(100, 108, 255, 0.1);
+}
+
+.add-node-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+// Modal styles for LLM Servers
+.llm-servers-modal .modal-content {
+    background: #1f1f1f;
+    color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+// Modal styles for Add Node
+.add-node-modal .modal-content {
+    background: #1f1f1f;
+    color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+@media (prefers-color-scheme: light) {
+    .llm-servers-modal .modal-content,
+    .add-node-modal .modal-content {
+        background: #ffffff;
+        color: #1f1f1f;
+    }
+}
+
+// Node types list styles
+.node-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    padding: 16px;
+}
+
+.node-type {
+    background: #2a2a2a;
+    border: 1px solid #3f3f3f;
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.node-type:hover {
+    background: #3f3f3f;
+    border-color: #646cff;
+    transform: translateY(-2px);
+}
+
+.node-type h3 {
+    margin: 0 0 8px 0;
+    color: #ffffff;
+    font-size: 1.1em;
+}
+
+.node-type p {
+    margin: 0;
+    color: #999;
+    font-size: 0.9em;
+}
+
+// Server list styles
+.server-list {
+    padding: 16px;
+}
+
+.server-controls {
+    margin-bottom: 16px;
+}
+
+.add-server-btn {
+    background: #646cff;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.add-server-btn:hover {
+    background: #535bf2;
+}
+
+.server-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.server-item {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr auto auto;
+    gap: 12px;
+    align-items: center;
+    background: #2a2a2a;
+    border: 1px solid #3f3f3f;
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.server-item input,
+.server-item select {
+    background: #1f1f1f;
+    border: 1px solid #3f3f3f;
+    color: #ffffff;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+}
+
+.server-item input:hover,
+.server-item select:hover {
+    border-color: #646cff;
+}
+
+.server-item input:focus,
+.server-item select:focus {
+    border-color: #646cff;
+    outline: none;
+}
+
+.server-item button {
+    white-space: nowrap;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.test-connection {
+    background: #2f2f2f;
+    color: #ffffff;
+    border: 1px solid #3f3f3f;
+}
+
+.test-connection:hover {
+    background: #3f3f3f;
+    border-color: #646cff;
+}
+
+.test-connection.success {
+    background: #22c55e;
+    border-color: #22c55e;
+    color: white;
+}
+
+.test-connection.error {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: white;
+}
+
+.remove-server {
+    background: #2f2f2f;
+    color: #ef4444;
+    border: 1px solid #3f3f3f;
+}
+
+.remove-server:hover {
+    background: #ef4444;
+    color: white;
+    border-color: #ef4444;
+}
+
+.loading {
+    text-align: center;
+    padding: 20px;
+    color: #999;
+}
+
+@media (prefers-color-scheme: light) {
+    .node-type {
+        background: #f5f5f5;
+        border-color: #ddd;
+    }
+
+    .node-type:hover {
+        background: #eee;
+    }
+
+    .node-type h3 {
+        color: #1f1f1f;
+    }
+
+    .node-type p {
+        color: #666;
+    }
+
+    .server-item {
+        background: #f5f5f5;
+        border-color: #ddd;
+    }
+
+    .server-item input,
+    .server-item select {
+        background: #ffffff;
+        border-color: #ddd;
+        color: #1f1f1f;
+    }
+
+    .test-connection,
+    .remove-server {
+        background: #ffffff;
+        border-color: #ddd;
+    }
+
+    .test-connection {
+        color: #1f1f1f;
+    }
+
+    .test-connection:hover {
+        background: #f5f5f5;
+    }
+
+    .remove-server {
+        color: #ef4444;
+    }
+
+    .loading {
+        color: #666;
     }
 }

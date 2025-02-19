@@ -29,8 +29,14 @@ class ReteEditor {
             extraButtons: this.getModalExtraButtons('buffer')
         });
         
-        this.createModal('LLM Settings', 'settings', {
-            icon: this.getModalIcon('settings')
+        this.createModal('LLM Settings', 'llm-servers', {
+            icon: this.getModalIcon('settings'),
+            extraButtons: this.getModalExtraButtons('llm-servers')
+        });
+        
+        this.createModal('Add Node', 'add-node', {
+            icon: this.getModalIcon('add-node'),
+            extraButtons: this.getModalExtraButtons('add-node')
         });
         
         this.createModal('System Logs', 'logs', {
@@ -54,6 +60,13 @@ class ReteEditor {
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                 </svg>
             `,
+            'add-node': `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="16"/>
+                    <line x1="8" y1="12" x2="16" y2="12"/>
+                </svg>
+            `,
             logs: `
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -70,6 +83,24 @@ class ReteEditor {
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M3 6h18"/>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            `,
+            'llm-servers': `
+                <button class="refresh-btn" title="Refresh Connections">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M23 4v6h-6"/>
+                        <path d="M1 20v-6h6"/>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                </button>
+            `,
+            'add-node': `
+                <button class="add-llm-btn" title="Add LLM Node">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="12" y1="8" x2="12" y2="16"/>
+                        <line x1="8" y1="12" x2="16" y2="12"/>
                     </svg>
                 </button>
             `,
@@ -94,18 +125,23 @@ class ReteEditor {
     createModal(title, className, config) {
         const modal = this.createModalBase(title, className, config);
         if (modal) {
-            this.modals.set(className, modal);
+            this.modals.set(className, modal.modal);
             
             // Add specific event handlers based on modal type
             switch (className) {
                 case 'buffer-logs':
-                    this.setupBufferLogsModal(modal);
+                    this.setupBufferLogsModal(modal.modal);
                     break;
-                case 'settings':
-                    this.setupSettingsModal(modal);
+                case 'llm-servers':
+                    this.setupLLMServersModal(modal.modal);
+                    // Initialize server list
+                    this.updateServerList();
+                    break;
+                case 'add-node':
+                    this.setupAddNodeModal(modal.modal);
                     break;
                 case 'logs':
-                    this.setupLogsModal(modal);
+                    this.setupLogsModal(modal.modal);
                     break;
             }
         }
@@ -116,6 +152,73 @@ class ReteEditor {
         const clearBtn = modal.querySelector('.clear-btn');
         if (clearBtn) {
             clearBtn.addEventListener('click', () => this.clearBufferLogs());
+        }
+    }
+
+    setupLLMServersModal(modal) {
+        const refreshBtn = modal.querySelector('.refresh-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => this.refreshServerConnections());
+        }
+
+        // Initialize server list
+        const content = modal.querySelector('.modal-content-body');
+        if (content) {
+            content.innerHTML = `
+                <div class="server-list">
+                    <div class="server-controls">
+                        <button class="add-server-btn">Add Server</button>
+                    </div>
+                    <div class="server-items"></div>
+                </div>
+            `;
+            
+            // Add event listeners for server management
+            const addServerBtn = content.querySelector('.add-server-btn');
+            if (addServerBtn) {
+                addServerBtn.addEventListener('click', () => this.addNewServer());
+            }
+        }
+    }
+
+    setupAddNodeModal(modal) {
+        const addLLMBtn = modal.querySelector('.add-llm-btn');
+        if (addLLMBtn) {
+            addLLMBtn.addEventListener('click', () => {
+                this.addNode('llm');
+                this.toggleModal('add-node');
+            });
+        }
+
+        // Initialize node types list
+        const content = modal.querySelector('.modal-content-body');
+        if (content) {
+            content.innerHTML = `
+                <div class="node-types">
+                    <div class="node-type" data-type="llm">
+                        <h3>LLM Node</h3>
+                        <p>Create a new Language Model node</p>
+                    </div>
+                    <div class="node-type" data-type="input">
+                        <h3>Input Node</h3>
+                        <p>Create a new input node</p>
+                    </div>
+                    <div class="node-type" data-type="output">
+                        <h3>Output Node</h3>
+                        <p>Create a new output node</p>
+                    </div>
+                </div>
+            `;
+
+            // Add event listeners for node type selection
+            const nodeTypes = content.querySelectorAll('.node-type');
+            nodeTypes.forEach(nodeType => {
+                nodeType.addEventListener('click', () => {
+                    const type = nodeType.dataset.type;
+                    this.addNode(type);
+                    this.toggleModal('add-node');
+                });
+            });
         }
     }
 
@@ -1090,6 +1193,122 @@ class ReteEditor {
         document.addEventListener('mouseup', () => {
             isResizing = false;
         });
+    }
+
+    refreshServerConnections() {
+        // Implement server connection refresh logic
+        const serverItems = document.querySelector('.server-items');
+        if (serverItems) {
+            // Add loading state
+            serverItems.innerHTML = '<div class="loading">Refreshing connections...</div>';
+            
+            // Simulate refresh (replace with actual implementation)
+            setTimeout(() => {
+                this.updateServerList();
+            }, 1000);
+        }
+    }
+
+    addNewServer() {
+        const serverItems = document.querySelector('.server-items');
+        if (serverItems) {
+            const serverId = `server-${Date.now()}`;
+            const serverHtml = `
+                <div class="server-item" data-id="${serverId}">
+                    <input type="text" class="server-name" placeholder="Server Name">
+                    <input type="text" class="server-url" placeholder="Server URL">
+                    <select class="server-type">
+                        <option value="llm-studio">LM Studio</option>
+                        <option value="ollama">Ollama</option>
+                    </select>
+                    <button class="test-connection">Test Connection</button>
+                    <button class="remove-server">Remove</button>
+                </div>
+            `;
+            serverItems.insertAdjacentHTML('beforeend', serverHtml);
+            
+            // Add event listeners for the new server
+            const newServer = serverItems.querySelector(`[data-id="${serverId}"]`);
+            if (newServer) {
+                const testBtn = newServer.querySelector('.test-connection');
+                const removeBtn = newServer.querySelector('.remove-server');
+                
+                testBtn?.addEventListener('click', () => this.testServerConnection(serverId));
+                removeBtn?.addEventListener('click', () => newServer.remove());
+            }
+        }
+    }
+
+    updateServerList() {
+        const serverItems = document.querySelector('.server-items');
+        if (serverItems) {
+            // Clear loading state
+            serverItems.innerHTML = '';
+            
+            // Add existing servers (replace with actual server data)
+            const servers = [
+                { id: 'lmstudio-1', name: 'LM Studio', url: 'http://localhost:1234/v1', type: 'llm-studio' },
+                { id: 'ollama-1', name: 'Ollama', url: 'http://localhost:11434', type: 'ollama' }
+            ];
+            
+            servers.forEach(server => {
+                const serverHtml = `
+                    <div class="server-item" data-id="${server.id}">
+                        <input type="text" class="server-name" value="${server.name}">
+                        <input type="text" class="server-url" value="${server.url}">
+                        <select class="server-type">
+                            <option value="llm-studio" ${server.type === 'llm-studio' ? 'selected' : ''}>LM Studio</option>
+                            <option value="ollama" ${server.type === 'ollama' ? 'selected' : ''}>Ollama</option>
+                        </select>
+                        <button class="test-connection">Test Connection</button>
+                        <button class="remove-server">Remove</button>
+                    </div>
+                `;
+                serverItems.insertAdjacentHTML('beforeend', serverHtml);
+            });
+            
+            // Add event listeners
+            const serverElements = serverItems.querySelectorAll('.server-item');
+            serverElements.forEach(server => {
+                const serverId = server.dataset.id;
+                const testBtn = server.querySelector('.test-connection');
+                const removeBtn = server.querySelector('.remove-server');
+                
+                testBtn?.addEventListener('click', () => this.testServerConnection(serverId));
+                removeBtn?.addEventListener('click', () => server.remove());
+            });
+        }
+    }
+
+    async testServerConnection(serverId) {
+        const serverItem = document.querySelector(`.server-item[data-id="${serverId}"]`);
+        if (!serverItem) return;
+        
+        const testBtn = serverItem.querySelector('.test-connection');
+        const url = serverItem.querySelector('.server-url').value;
+        const type = serverItem.querySelector('.server-type').value;
+        
+        if (testBtn) {
+            testBtn.textContent = 'Testing...';
+            testBtn.disabled = true;
+            
+            try {
+                // Implement actual connection test logic here
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate test
+                
+                testBtn.textContent = 'Connected ✓';
+                testBtn.classList.add('success');
+            } catch (error) {
+                testBtn.textContent = 'Failed ✗';
+                testBtn.classList.add('error');
+            } finally {
+                setTimeout(() => {
+                    testBtn.textContent = 'Test Connection';
+                    testBtn.disabled = false;
+                    testBtn.classList.remove('success', 'error');
+                }, 3000);
+            }
+        }
     }
 }
 
