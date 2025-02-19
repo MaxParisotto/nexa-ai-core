@@ -15,7 +15,15 @@
       {
         "title": "nexa-ai-core",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "focus": true,
+        "visible": true,
+        "center": true
       }
     ],
     "security": {
@@ -36,6 +44,7 @@
   "plugins": {
     "fs": {},
     "persisted-scope": null,
-    "cli": {}
+    "cli": {},
+    "window-state": null
   }
 }

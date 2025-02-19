@@ -7,7 +7,13 @@ class ReteEditor {
         this.selectedNode = null;
         this.modelsFetched = new Set(); // Track which servers have had their models fetched
         this.modelCache = new Map(); // Cache for storing fetched models
+        this.activeConnections = new Map(); // Track active server connections
+        this.outputBuffers = new Map(); // Buffer for node outputs
+        this.taskRoutes = new Map(); // Route configuration for tasks
+        this.bufferLogs = new Map(); // Store buffer logs for each node
+        
         this.initializeEditor();
+        this.createBufferLogPanel();
     }
 
     initializeEditor() {
@@ -97,45 +103,7 @@ class ReteEditor {
                 return;
             }
 
-            try {
-                modelSelect.disabled = true;
-                loadingIndicator.style.display = 'block';
-                modelSelect.innerHTML = '<option value="">Loading models...</option>';
-
-                const { invoke } = window.__TAURI__.tauri;
-                const command = serverUrl.includes('11434') ? 'fetch_models_ollama' : 'fetch_models_lmstudio';
-                
-                const result = await invoke(command, {
-                    url: serverUrl,
-                    timeout: 5000
-                });
-
-                // Log the raw response for debugging
-                console.log('Raw server response:', result);
-
-                // Handle the nested Result structure from Rust
-                if (result && result.Ok) {
-                    const models = Array.isArray(result.Ok) ? result.Ok : 
-                                 (result.Ok.Ok && Array.isArray(result.Ok.Ok)) ? result.Ok.Ok : [];
-                    
-                    if (models.length > 0) {
-                        this.modelCache.set(serverUrl, models);
-                        this.updateModelSelect(modelSelect, models);
-                    } else {
-                        throw new Error('No models found');
-                    }
-                } else {
-                    // If result.Err exists, use that error message
-                    const errorMessage = result && result.Err ? result.Err : 'Failed to load models';
-                    throw new Error(errorMessage);
-                }
-            } catch (error) {
-                console.error('Error fetching models:', error);
-                modelSelect.innerHTML = `<option value="">Error: ${error.message || 'Failed to load models'}</option>`;
-                modelSelect.disabled = true;
-            } finally {
-                loadingIndicator.style.display = 'none';
-            }
+            await this.fetchModels(serverUrl, modelSelect, loadingIndicator);
         });
 
         // Add temperature slider event listener
@@ -144,6 +112,57 @@ class ReteEditor {
         });
 
         return content;
+    }
+
+    async fetchModels(serverUrl, modelSelect, loadingIndicator) {
+        try {
+            modelSelect.disabled = true;
+            loadingIndicator.style.display = 'block';
+            modelSelect.innerHTML = '<option value="">Loading models...</option>';
+
+            const { invoke } = window.__TAURI__.tauri;
+            const command = serverUrl.includes('11434') ? 'fetch_models_ollama' : 'fetch_models_lmstudio';
+            
+            const result = await invoke(command, {
+                url: serverUrl,
+                timeout: 5000
+            });
+
+            console.log('Raw server response:', result);
+
+            let models = [];
+            
+            if (result && typeof result === 'object') {
+                // Handle the outer Result
+                if ('Ok' in result) {
+                    const innerResult = result.Ok;
+                    // Handle the inner Result
+                    if (innerResult && typeof innerResult === 'object') {
+                        if ('Ok' in innerResult) {
+                            models = innerResult.Ok;
+                        } else if ('Err' in innerResult) {
+                            throw new Error(innerResult.Err);
+                        }
+                    }
+                } else if ('Err' in result) {
+                    throw new Error(result.Err);
+                }
+            }
+
+            if (!Array.isArray(models) || models.length === 0) {
+                throw new Error('No models found');
+            }
+
+            this.modelCache.set(serverUrl, models);
+            this.updateModelSelect(modelSelect, models);
+
+        } catch (error) {
+            console.error('Error fetching models:', error);
+            modelSelect.innerHTML = `<option value="">Error: ${error.message || 'Failed to load models'}</option>`;
+            modelSelect.disabled = true;
+        } finally {
+            loadingIndicator.style.display = 'none';
+        }
     }
 
     parseModelsResponse(result) {
@@ -181,25 +200,30 @@ class ReteEditor {
     }
 
     updateModelSelect(modelSelect, models) {
-        // Log the models being processed
         console.log('Updating model select with models:', models);
 
-        if (!Array.isArray(models)) {
-            console.error('Models is not an array:', models);
-            modelSelect.innerHTML = '<option value="">Error loading models</option>';
+        if (!Array.isArray(models) || models.length === 0) {
+            console.error('Invalid models array:', models);
+            modelSelect.innerHTML = '<option value="">No models available</option>';
             modelSelect.disabled = true;
             return;
         }
 
-        const options = models.map(model => {
-            const modelName = typeof model === 'string' ? model : 
-                            (model && model.name) ? model.name : 
-                            String(model);
-            return `<option value="${modelName}">${modelName}</option>`;
-        }).join('');
+        try {
+            const options = models.map(model => {
+                const modelName = typeof model === 'string' ? model : 
+                                (model && typeof model.name) ? model.name :
+                                String(model);
+                return `<option value="${modelName}">${modelName}</option>`;
+            }).join('');
 
-        modelSelect.innerHTML = '<option value="">Select Model</option>' + options;
-        modelSelect.disabled = false;
+            modelSelect.innerHTML = '<option value="">Select Model</option>' + options;
+            modelSelect.disabled = false;
+        } catch (error) {
+            console.error('Error creating model options:', error);
+            modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            modelSelect.disabled = true;
+        }
     }
 
     createToolsSection() {
@@ -447,27 +471,131 @@ class ReteEditor {
         this.container.appendChild(svg);
     }
 
-    runNode(node) {
-        const serverSelect = node.querySelector('.server-select');
-        const modelSelect = node.querySelector('.model-select');
-        const taskInput = node.querySelector('.task-input');
-        const tools = Array.from(node.querySelectorAll('.tools-list input:checked')).map(cb => cb.value);
-        const temperature = node.querySelector('.param-slider').value / 100;
-        const maxTokens = node.querySelector('.param-input').value;
-
-        const config = {
-            server: serverSelect.value,
-            model: modelSelect.value,
-            task: taskInput.value,
-            tools,
-            parameters: {
-                temperature,
-                maxTokens: parseInt(maxTokens)
+    async runNode(node) {
+        try {
+            const serverSelect = node.querySelector('.node-select');
+            const modelSelect = node.querySelector('.node-select');
+            const taskInput = node.querySelector('.node-input');
+            const tempSlider = node.querySelector('.param-slider');
+            
+            if (!serverSelect.value || !modelSelect.value || !taskInput.value.trim()) {
+                throw new Error('Please fill in all required fields');
             }
-        };
 
-        console.log('Running node with config:', config);
-        // Here you would implement the actual LLM call
+            // Update node status
+            node.classList.add('processing');
+            const statusIndicator = document.createElement('div');
+            statusIndicator.className = 'node-status';
+            statusIndicator.textContent = 'Processing...';
+            node.appendChild(statusIndicator);
+
+            // Prepare the chat request
+            const message = taskInput.value.trim();
+            const temperature = parseFloat(tempSlider.value) / 100;
+
+            // Get connected output nodes
+            const outputNodes = this.getConnectedOutputNodes(node.id);
+            
+            // Create output buffer for this node if it doesn't exist
+            if (!this.outputBuffers.has(node.id)) {
+                this.outputBuffers.set(node.id, []);
+            }
+
+            const { invoke } = window.__TAURI__.tauri;
+            const result = await invoke('chat_completion', {
+                server_url: serverSelect.value,
+                model: modelSelect.value,
+                message: message,
+                temperature: temperature
+            });
+
+            // Process the result
+            if (result.Ok) {
+                const response = result.Ok;
+                
+                // Buffer the output
+                this.outputBuffers.get(node.id).push({
+                    timestamp: new Date().toISOString(),
+                    input: message,
+                    output: response,
+                    metadata: {
+                        model: modelSelect.value,
+                        temperature: temperature
+                    }
+                });
+
+                // Route the output to connected nodes
+                for (const outputNode of outputNodes) {
+                    await this.routeOutput(node.id, outputNode, response);
+                }
+
+                // Update node status
+                statusIndicator.textContent = 'Completed';
+                statusIndicator.classList.add('success');
+            } else if (result.Err) {
+                throw new Error(result.Err);
+            }
+
+        } catch (error) {
+            console.error('Node execution error:', error);
+            const statusIndicator = node.querySelector('.node-status');
+            if (statusIndicator) {
+                statusIndicator.textContent = `Error: ${error.message}`;
+                statusIndicator.classList.add('error');
+            }
+        } finally {
+            node.classList.remove('processing');
+            // Remove status indicator after delay
+            setTimeout(() => {
+                const statusIndicator = node.querySelector('.node-status');
+                if (statusIndicator) {
+                    statusIndicator.remove();
+                }
+            }, 3000);
+        }
+    }
+
+    getConnectedOutputNodes(nodeId) {
+        return this.connections
+            .filter(conn => conn.from === nodeId)
+            .map(conn => this.nodes.find(n => n.id === conn.to))
+            .filter(Boolean);
+    }
+
+    async routeOutput(sourceNodeId, targetNode, output) {
+        const targetInput = targetNode.querySelector('.node-input');
+        if (targetInput) {
+            // Get the route configuration for this connection
+            const routeConfig = this.taskRoutes.get(`${sourceNodeId}-${targetNode.id}`);
+            
+            // Apply routing logic based on configuration
+            let processedOutput = output;
+            if (routeConfig && routeConfig.transform) {
+                processedOutput = await routeConfig.transform(output);
+            }
+
+            // Update the target node's input
+            targetInput.value = processedOutput;
+            
+            // Trigger any necessary updates
+            const event = new Event('input', { bubbles: true });
+            targetInput.dispatchEvent(event);
+        }
+    }
+
+    // Add routing configuration for a connection
+    setTaskRoute(sourceNodeId, targetNodeId, config) {
+        this.taskRoutes.set(`${sourceNodeId}-${targetNodeId}`, config);
+    }
+
+    // Get buffered outputs for a node
+    getNodeOutputs(nodeId) {
+        return this.outputBuffers.get(nodeId) || [];
+    }
+
+    // Clear output buffer for a node
+    clearNodeOutputs(nodeId) {
+        this.outputBuffers.delete(nodeId);
     }
 
     deleteNode(node) {
@@ -624,6 +752,209 @@ class ReteEditor {
     destroy() {
         this.clear();
         this.container.innerHTML = '';
+    }
+
+    // Add this new method to create the buffer log panel
+    createBufferLogPanel() {
+        // Create the buffer log button in the status bar
+        const statusActions = document.querySelector('.status-actions');
+        if (!statusActions) return;
+
+        const bufferLogBtn = document.createElement('button');
+        bufferLogBtn.className = 'buffer-logs-btn';
+        bufferLogBtn.title = 'Buffer Logs';
+        bufferLogBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12V7H3v5"/>
+                <path d="M3 17h18"/>
+                <path d="M21 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+        `;
+
+        // Create the buffer log panel
+        const logPanel = document.createElement('div');
+        logPanel.className = 'modal buffer-logs-modal';
+        logPanel.style.display = 'none';
+        logPanel.innerHTML = `
+            <div class="modal-content buffer-logs-content">
+                <div class="modal-header">
+                    <h2>Buffer Logs</h2>
+                    <div class="logs-actions">
+                        <button class="clear-btn" title="Clear Logs">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 6h18"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                        <button class="close-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="buffer-log-content">
+                    <div class="buffer-log-entries"></div>
+                </div>
+                <div class="resize-handle"></div>
+            </div>
+        `;
+
+        // Add event listeners
+        bufferLogBtn.addEventListener('click', () => {
+            logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none';
+            bufferLogBtn.classList.toggle('active');
+        });
+
+        const closeBtn = logPanel.querySelector('.close-btn');
+        closeBtn.addEventListener('click', () => {
+            logPanel.style.display = 'none';
+            bufferLogBtn.classList.remove('active');
+        });
+
+        const clearBtn = logPanel.querySelector('.clear-btn');
+        clearBtn.addEventListener('click', () => {
+            this.clearBufferLogs();
+        });
+
+        // Make the panel draggable and resizable
+        this.makeModalDraggable(logPanel);
+        this.makeModalResizable(logPanel);
+
+        // Add the button and panel to the DOM
+        statusActions.appendChild(bufferLogBtn);
+        document.body.appendChild(logPanel);
+        this.bufferLogPanel = logPanel;
+    }
+
+    // Add helper method for making modals draggable
+    makeModalDraggable(modal) {
+        const header = modal.querySelector('.modal-header');
+        let isDragging = false;
+        let currentX;
+        let currentY;
+        let initialX;
+        let initialY;
+
+        header.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.logs-actions')) return;
+            isDragging = true;
+            initialX = e.clientX - modal.offsetLeft;
+            initialY = e.clientY - modal.offsetTop;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            
+            modal.style.left = `${currentX}px`;
+            modal.style.top = `${currentY}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+    }
+
+    // Add helper method for making modals resizable
+    makeModalResizable(modal) {
+        const handle = modal.querySelector('.resize-handle');
+        const content = modal.querySelector('.modal-content');
+        let isResizing = false;
+        let startWidth;
+        let startHeight;
+        let startX;
+        let startY;
+
+        handle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startWidth = content.offsetWidth;
+            startHeight = content.offsetHeight;
+            startX = e.clientX;
+            startY = e.clientY;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            
+            content.style.width = `${Math.max(400, startWidth + dx)}px`;
+            content.style.height = `${Math.max(300, startHeight + dy)}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            isResizing = false;
+        });
+    }
+
+    // Add this method to log buffer operations
+    logBufferOperation(nodeId, type, data) {
+        if (!this.bufferLogs.has(nodeId)) {
+            this.bufferLogs.set(nodeId, []);
+        }
+
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            type,
+            data,
+        };
+
+        this.bufferLogs.get(nodeId).push(logEntry);
+        this.updateBufferLogDisplay(nodeId, logEntry);
+    }
+
+    // Add this method to update the log display
+    updateBufferLogDisplay(nodeId, logEntry) {
+        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
+        const entry = document.createElement('div');
+        entry.className = `buffer-log-entry ${logEntry.type}`;
+        
+        const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
+        const nodeName = this.nodes.find(n => n.id === nodeId)?.querySelector('.node-header span')?.textContent || nodeId;
+
+        entry.innerHTML = `
+            <div class="timestamp">${timestamp}</div>
+            <div class="node-info">${nodeName}</div>
+            <div class="data-flow">
+                ${this.formatLogData(logEntry.type, logEntry.data)}
+            </div>
+        `;
+
+        logEntries.appendChild(entry);
+        logEntries.scrollTop = logEntries.scrollHeight;
+    }
+
+    // Add this method to format log data
+    formatLogData(type, data) {
+        switch (type) {
+            case 'input':
+                return `📥 Input: ${this.truncateText(data.input)}`;
+            case 'output':
+                return `📤 Output: ${this.truncateText(data.output)}`;
+            case 'error':
+                return `❌ Error: ${data.message}`;
+            default:
+                return JSON.stringify(data);
+        }
+    }
+
+    // Add this helper method
+    truncateText(text, length = 100) {
+        return text.length > length ? text.substring(0, length) + '...' : text;
+    }
+
+    // Add this method to clear logs
+    clearBufferLogs() {
+        this.bufferLogs.clear();
+        const logEntries = this.bufferLogPanel.querySelector('.buffer-log-entries');
+        logEntries.innerHTML = '';
     }
 }
 

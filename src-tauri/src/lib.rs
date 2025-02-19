@@ -7,23 +7,31 @@ use reqwest::Client;
 use std::collections::VecDeque;
 use std::time::Duration;
 use tauri_plugin_log::Target;
-use serde_json;
-use tokio::time::sleep;
-use sysinfo::System;
+use serde_json::{self, json};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use futures_util::{StreamExt, SinkExt};
+use log;
+use serde_json::Value;
+use tokio::sync::mpsc;
+use sysinfo::System;
+
+// Define WebSocket types
+type WebSocket = WebSocketStream<TcpStream>;
+type WsSender = mpsc::Sender<Message>;
+static WS_SENDER: tokio::sync::Mutex<Option<WsSender>> = tokio::sync::Mutex::const_new(None);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LogEntry {
-    level: String,
-    message: String,
-    timestamp: String,
-    target: String,
+    pub level: String,
+    pub message: String, 
+    pub timestamp: String,
+    pub target: String,
 }
 
-struct LogState {
-    entries: VecDeque<LogEntry>,
+#[derive(Debug)]
+pub struct LogState {
+    pub entries: VecDeque<LogEntry>,
 }
 
 impl LogState {
@@ -374,207 +382,144 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+async fn ollama_chat(server_url: &str, model: &str, message: &str, temperature: f32) -> Result<String, String> {
+    let client = Client::new();
+    let url = format!("{}/api/chat", server_url.trim_end_matches('/'));
+    
+    let response = client.post(&url)
+        .json(&json!({
+            "model": model,
+            "messages": [{
+                "role": "user",
+                "content": message
+            }],
+            "temperature": temperature,
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        let result: Value = response.json().await.map_err(|e| e.to_string())?;
+        Ok(result["message"]["content"].as_str()
+            .ok_or_else(|| "Invalid response format".to_string())?
+            .to_string())
+    } else {
+        Err(format!("Request failed: {}", response.status()))
+    }
+}
+
+async fn lmstudio_chat(server_url: &str, model: &str, message: &str, temperature: f32) -> Result<String, String> {
+    let client = Client::new();
+    let url = format!("{}/chat/completions", server_url.trim_end_matches('/'));
+    
+    let response = client.post(&url)
+        .json(&json!({
+            "model": model,
+            "messages": [{
+                "role": "user",
+                "content": message
+            }],
+            "temperature": temperature,
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        let result: Value = response.json().await.map_err(|e| e.to_string())?;
+        Ok(result["choices"][0]["message"]["content"].as_str()
+            .ok_or_else(|| "Invalid response format".to_string())?
+            .to_string())
+    } else {
+        Err(format!("Request failed: {}", response.status()))
+    }
+}
+
 #[tauri::command]
-async fn chat_completion(server_url: String, model: String, message: String, log_state: State<'_, Mutex<LogState>>) -> Result<Result<String, String>, String> {
-    // Log function entry with all parameters
-    add_log_entry(&log_state, "debug", &format!(
-        "chat_completion called with server_url: {}, model: {}, message_length: {}",
-        server_url, model, message.len()
-    ), "chat")?;
-    
-    // Initial debug logs to confirm function entry and parameters
-    add_log_entry(&log_state, "debug", "Chat completion function called", "chat")?;
-    add_log_entry(&log_state, "info", &format!(
-        "Starting chat request with model: {}, server: {}",
-        model, server_url
-    ), "chat")?;
-    
-    // Log the request details
-    add_log_entry(&log_state, "debug", &format!(
-        "Chat request details:\nServer: {}\nModel: {}\nMessage length: {}\nMessage preview: {}...",
-        server_url,
-        model,
-        message.len(),
-        message.chars().take(100).collect::<String>()
-    ), "chat")?;
-
-    // Validate input parameters
-    if server_url.is_empty() || model.is_empty() || message.is_empty() {
-        let err = "Invalid parameters: server_url, model, and message must not be empty".to_string();
-        add_log_entry(&log_state, "error", &err, "chat")?;
-        return Ok(Err(err));
-    }
-
-    let base_url = server_url.trim_end_matches('/');
-    let is_ollama = base_url.contains("localhost:11434");
-    
-    let chat_url = if is_ollama {
-        format!("{}/api/chat", base_url)
-    } else {
-        if base_url.ends_with("/v1") {
-            format!("{}/chat/completions", base_url)
-        } else {
-            format!("{}/v1/chat/completions", base_url)
-        }
+async fn chat_completion(
+    server_url: String,
+    model: String,
+    message: String,
+    temperature: f32,
+) -> Result<String, String> {
+    let response = match server_url.contains("11434") {
+        true => ollama_chat(&server_url, &model, &message, temperature).await,
+        false => lmstudio_chat(&server_url, &model, &message, temperature).await,
     };
 
-    add_log_entry(&log_state, "info", &format!("Using {} API endpoint: {}", 
-        if is_ollama { "Ollama" } else { "OpenAI compatible" },
-        chat_url
-    ), "chat")?;
-
-    // Create HTTP client with custom settings
-    let client = match Client::builder()
-        .timeout(Duration::from_secs(30))
-        .pool_idle_timeout(Duration::from_secs(15))
-        .pool_max_idle_per_host(1)
-        .no_proxy()
-        .build() {
-            Ok(client) => {
-                add_log_entry(&log_state, "debug", "HTTP client created successfully", "chat")?;
-                client
-            },
-            Err(e) => {
-                let err = format!("Failed to create HTTP client: {}", e);
-                add_log_entry(&log_state, "error", &err, "chat")?;
-                return Ok(Err(err));
-            }
-        };
-
-    // Construct the request body
-    let chat_message = ChatMessage {
-        role: "user".to_string(),
-        content: message.clone(),
-    };
-
-    let request = if is_ollama {
-        ChatRequest {
-            model: model.clone(),
-            messages: vec![chat_message],
-            temperature: None,
-            stream: false,
-        }
-    } else {
-        ChatRequest {
-            model: model.clone(),
-            messages: vec![chat_message],
-            temperature: Some(0.7),
-            stream: false,
-        }
-    };
-
-    match serde_json::to_string_pretty(&request) {
-        Ok(json) => {
-            add_log_entry(&log_state, "debug", &format!("Request payload prepared:\n{}", json), "chat")?;
-        },
-        Err(e) => {
-            let err = format!("Failed to serialize request: {}", e);
-            add_log_entry(&log_state, "error", &err, "chat")?;
-            return Ok(Err(err));
-        }
-    };
-
-    // Send the request with retry logic
-    let mut retries = 2;
-    let mut last_error = None;
-
-    while retries > 0 {
-        add_log_entry(&log_state, "info", &format!("Sending request (attempt {})", 3 - retries), "chat")?;
-
-        let request_builder = client.post(&chat_url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json");
-
-        match request_builder.json(&request).send().await {
-            Ok(response) => {
-                let status = response.status();
-                add_log_entry(&log_state, "debug", &format!("Received response with status: {}", status), "chat")?;
-
-                if status.is_success() {
-                    let response_text = match response.text().await {
-                        Ok(text) => {
-                            add_log_entry(&log_state, "debug", &format!("Raw response received:\n{}", text), "chat")?;
-                            text
-                        },
-                        Err(e) => {
-                            let err = format!("Failed to read response body: {}", e);
-                            add_log_entry(&log_state, "error", &err, "chat")?;
-                            return Ok(Err(err));
-                        }
-                    };
-
-                    // Parse the response based on server type
-                    let content = if is_ollama {
-                        match serde_json::from_str::<ChatResponse>(&response_text) {
-                            Ok(ollama_response) => {
-                                match ollama_response.message {
-                                    Some(msg) => {
-                                        add_log_entry(&log_state, "info", "Successfully processed Ollama response", "chat")?;
-                                        msg.content
-                                    },
-                                    None => {
-                                        let err = "No message in Ollama response".to_string();
-                                        add_log_entry(&log_state, "error", &err, "chat")?;
-                                        return Ok(Err(err));
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                let err = format!("Failed to parse Ollama response: {}", e);
-                                add_log_entry(&log_state, "error", &format!("{}\nResponse text: {}", err, response_text), "chat")?;
-                                return Ok(Err(err));
-                            }
-                        }
-                    } else {
-                        match serde_json::from_str::<ChatResponse>(&response_text) {
-                            Ok(openai_response) => {
-                                match openai_response.choices.and_then(|c| c.first().cloned()) {
-                                    Some(choice) => {
-                                        add_log_entry(&log_state, "info", "Successfully processed OpenAI response", "chat")?;
-                                        choice.message.content
-                                    },
-                                    None => {
-                                        let err = "No choices in OpenAI response".to_string();
-                                        add_log_entry(&log_state, "error", &err, "chat")?;
-                                        return Ok(Err(err));
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                let err = format!("Failed to parse OpenAI response: {}", e);
-                                add_log_entry(&log_state, "error", &format!("{}\nResponse text: {}", err, response_text), "chat")?;
-                                return Ok(Err(err));
-                            }
-                        }
-                    };
-
-                    add_log_entry(&log_state, "info", "Chat request completed successfully", "chat")?;
-                    return Ok(Ok(content));
-                } else {
-                    let response_text = response.text().await.unwrap_or_default();
-                    let err = format!("Server returned error status: {} - {}", status, response_text);
-                    add_log_entry(&log_state, "error", &err, "chat")?;
-                    last_error = Some(err);
-                    retries -= 1;
+    // Send the response through WebSocket for real-time updates
+    if let Ok(response_text) = &response {
+        if let Some(tx) = WS_SENDER.lock().await.as_ref() {
+            let update = json!({
+                "type": "chat_response",
+                "data": {
+                    "model": model,
+                    "message": message,
+                    "response": response_text,
+                    "timestamp": chrono::Local::now().to_rfc3339()
                 }
-            }
-            Err(e) => {
-                let err = format!("Request failed: {}", e);
-                add_log_entry(&log_state, "error", &err, "chat")?;
-                last_error = Some(err);
-                retries -= 1;
-            }
-        }
-
-        if retries > 0 {
-            add_log_entry(&log_state, "info", &format!("Retrying in 1 second... ({} attempts remaining)", retries), "chat")?;
-            sleep(Duration::from_secs(1)).await;
+            });
+            
+            let _ = tx.send(Message::Text(update.to_string().into())).await;
         }
     }
 
-    let final_error = last_error.unwrap_or_else(|| "Unknown error occurred".to_string());
-    add_log_entry(&log_state, "error", &format!("All retry attempts failed: {}", final_error), "chat")?;
-    Ok(Err(final_error))
+    response
+}
+
+// WebSocket handler for real-time updates
+pub async fn handle_ws_connection(ws: WebSocket) {
+    let (mut tx, mut rx) = ws.split();
+    let (sender, mut receiver) = mpsc::channel::<Message>(32);
+    
+    // Store sender for broadcasting updates
+    *WS_SENDER.lock().await = Some(sender);
+
+    // Forward received messages to all connected clients
+    let forward_task = tokio::spawn(async move {
+        while let Some(msg) = receiver.recv().await {
+            if let Err(e) = tx.send(msg).await {
+                log::error!("Failed to forward message: {}", e);
+                break;
+            }
+        }
+    });
+
+    // Handle incoming messages
+    let receive_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = rx.next().await {
+            match msg {
+                Message::Text(text) => {
+                    log::info!("Received message: {}", text);
+                    // Handle incoming message routing
+                    if let Ok(update) = serde_json::from_str::<Value>(&text) {
+                        if let Some(msg_type) = update.get("type").and_then(|t| t.as_str()) {
+                            match msg_type {
+                                "node_output" => {
+                                    // Handle node output routing
+                                    if let Some(tx) = WS_SENDER.lock().await.as_ref() {
+                                        let _ = tx.send(Message::Text(text.into())).await;
+                                    }
+                                }
+                                _ => log::warn!("Unknown message type: {}", msg_type),
+                            }
+                        }
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+    });
+
+    // Wait for tasks to complete
+    tokio::select! {
+        _ = forward_task => {},
+        _ = receive_task => {},
+    }
 }
 
 #[tauri::command]
@@ -597,9 +542,18 @@ pub async fn start_websocket_server() -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to bind to address: {}", e))?;
 
+    log::info!("WebSocket server listening on {}", addr);
+
     tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            tokio::spawn(handle_connection(stream));
+        while let Ok((stream, addr)) = listener.accept().await {
+            log::info!("New WebSocket connection from: {}", addr);
+            
+            tokio::spawn(async move {
+                match handle_connection(stream).await {
+                    Ok(_) => log::info!("WebSocket connection closed gracefully: {}", addr),
+                    Err(e) => log::error!("WebSocket connection error: {}", e),
+                }
+            });
         }
     });
 
@@ -611,26 +565,34 @@ async fn handle_connection(stream: TcpStream) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to accept WebSocket connection: {}", e))?;
 
-    println!("New WebSocket connection established");
-
     let (mut tx, mut rx) = ws_stream.split();
 
+    // Handle incoming messages only
     while let Some(msg) = rx.next().await {
-        let msg = msg.map_err(|e| format!("Failed to receive message: {}", e))?;
-
         match msg {
-            Message::Text(text) => {
-                println!("Received text: {}", text);
-                // Echo the message back to the client
-                tx.send(Message::Text(format!("Echo: {}", text).into()))
-                    .await
-                    .map_err(|e| format!("Failed to send message: {}", e))?;
+            Ok(Message::Text(text)) => {
+                log::debug!("Received text message: {}", text);
+                // Echo back with a timestamp
+                let response = format!("Received at {}: {}", 
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    text
+                );
+                if let Err(e) = tx.send(Message::Text(response.into())).await {
+                    log::error!("Failed to send response: {}", e);
+                    break;
+                }
             }
-            Message::Close(_) => {
-                println!("WebSocket connection closed");
+            Ok(Message::Close(_)) => {
+                log::info!("Client initiated close");
                 break;
             }
-            _ => (),
+            Ok(_) => {
+                // Ignore other message types
+                continue;
+            }
+            Err(e) => {
+                return Err(format!("WebSocket error: {}", e));
+            }
         }
     }
 
@@ -650,6 +612,7 @@ pub fn run() {
         .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_persisted_scope::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
@@ -673,7 +636,6 @@ pub fn run() {
             .level(log::LevelFilter::Debug)
             .build())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_opener::init())
